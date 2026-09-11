@@ -10,7 +10,7 @@ import { chevronBackOutline, chevronForwardOutline, personOutline, trashOutline,
 import { useAuth } from "../context/AuthContext";
 import { getSalesByDateRange, deleteSale, removeItemFromSale, updateItemPrice, splitItemPrice } from "../data/saleRepository";
 import { getShopUsers } from "../data/shopRepository";
-import type { Sale, ShopUser } from "../data/types";
+import type { Sale, ShopUser, PaymentType } from "../data/types";
 import { fmtK, fmtVariant, fmtDate, fmtTime, fmtDateTime } from "../utils/format";
 import ShopHeaderTag from "../components/ShopHeaderTag";
 import DateRangeFilter, { todayStr, monthStartStr } from "../components/DateRangeFilter";
@@ -30,7 +30,7 @@ function saleLineKey(item: Sale["items"][number]): string {
   return item.splitId ? `${base}__${item.splitId}` : base;
 }
 
-const PAYMENT_BADGE: Record<Sale["paymentType"], { label: string; bg: string; color: string }> = {
+const PAYMENT_BADGE: Record<PaymentType, { label: string; bg: string; color: string }> = {
   cash: { label: "💵 ສົດ", bg: "var(--app-success-surface)", color: "var(--app-success)" },
   qr: { label: "📱 ໂອນ", bg: "var(--app-info-surface)", color: "var(--app-info)" },
   cod: { label: "📦 COD", bg: "var(--app-warning-surface)", color: "var(--app-warning)" },
@@ -173,21 +173,26 @@ const SalesHistory: React.FC = () => {
     }
   }
 
-  const totalRevenue = sales.reduce((s, t) => s + t.total, 0);
-  const cashTotal = sales.filter((s) => s.paymentType === "cash").reduce((s, t) => s + t.total, 0);
-  const qrTotal = sales.filter((s) => s.paymentType === "qr").reduce((s, t) => s + t.total, 0);
-  const codTotal = sales.filter((s) => s.paymentType === "cod").reduce((s, t) => s + t.total, 0);
-  const itemCount = sales.reduce((s, sale) => s + sale.items.reduce((is, i) => is + i.quantity, 0), 0);
-  const totalDiscount = sales.reduce((s, sale) =>
+  // Dine-in orders that haven't been billed yet (paymentType is still null)
+  // are excluded from every revenue/history figure below — they only count
+  // once Check Bill (see CheckBill.tsx) marks them "paid".
+  const paidSales = sales.filter((s) => s.status === "paid");
+
+  const totalRevenue = paidSales.reduce((s, t) => s + t.total, 0);
+  const cashTotal = paidSales.filter((s) => s.paymentType === "cash").reduce((s, t) => s + t.total, 0);
+  const qrTotal = paidSales.filter((s) => s.paymentType === "qr").reduce((s, t) => s + t.total, 0);
+  const codTotal = paidSales.filter((s) => s.paymentType === "cod").reduce((s, t) => s + t.total, 0);
+  const itemCount = paidSales.reduce((s, sale) => s + sale.items.reduce((is, i) => is + i.quantity, 0), 0);
+  const totalDiscount = paidSales.reduce((s, sale) =>
     s + sale.items.reduce((is, item) => {
       if (item.isGift) return is;
       return is + ((item.originalPrice ?? item.unitPrice) - item.unitPrice) * item.quantity;
     }, 0), 0);
-  const totalCost = sales.reduce((s, sale) =>
+  const totalCost = paidSales.reduce((s, sale) =>
     s + sale.items.reduce((is, item) => is + ((item.costPrice ?? 0) * item.quantity), 0), 0);
   const grossProfit = totalRevenue - totalCost;
-  const hasCostData = (isOwner || permissions.canViewFinance) && sales.some((sale) => sale.items.some((item) => item.costPrice));
-  const lossTotal = sales.reduce((s, sale) =>
+  const hasCostData = (isOwner || permissions.canViewFinance) && paidSales.some((sale) => sale.items.some((item) => item.costPrice));
+  const lossTotal = paidSales.reduce((s, sale) =>
     s + sale.items.reduce((is, item) => {
       if (!item.isGift && item.costPrice != null && item.unitPrice < item.costPrice) {
         return is + (item.costPrice - item.unitPrice) * item.quantity;
@@ -196,7 +201,7 @@ const SalesHistory: React.FC = () => {
     }, 0), 0);
 
   const staffRows = users.map((u) => {
-    const mine = sales.filter((s) => s.sellerUid === u.id);
+    const mine = paidSales.filter((s) => s.sellerUid === u.id);
     return {
       uid: u.id,
       name: u.displayName || u.email,
@@ -206,7 +211,7 @@ const SalesHistory: React.FC = () => {
       sales: [...mine].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
     };
   }).sort((a, b) => b.total - a.total);
-  const unattributed = sales.filter((s) => !s.sellerUid);
+  const unattributed = paidSales.filter((s) => !s.sellerUid);
   const selectedStaff = staffRows.find((r) => r.uid === selectedUid) ?? null;
 
   return (
@@ -280,7 +285,7 @@ const SalesHistory: React.FC = () => {
                     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {selectedStaff.sales.map((sale) => {
                         const qty = sale.items.reduce((s, i) => s + i.quantity, 0);
-                        const badge = PAYMENT_BADGE[sale.paymentType];
+                        const badge = PAYMENT_BADGE[sale.paymentType!]; // staffRows is built from paidSales — always non-null here
                         const names = sale.items.map(saleItemLabel).join(", ");
                         return (
                           <div
@@ -405,7 +410,7 @@ const SalesHistory: React.FC = () => {
                   {fmtK(totalRevenue)} ກີບ
                 </p>
                 <p style={{ margin: "3px 0 0", fontSize: "0.78rem", opacity: 0.8 }}>
-                  {sales.length} ລາຍການ · {itemCount} ຊິ້ນ
+                  {paidSales.length} ລາຍການ · {itemCount} ຊິ້ນ
                 </p>
               </div>
 
@@ -512,16 +517,16 @@ const SalesHistory: React.FC = () => {
                 <p style={{ margin: 0, fontWeight: 700, fontSize: "0.88rem", color: "var(--app-text-secondary)" }}>
                   ລາຍການທັງໝົດ
                 </p>
-                <span style={{ fontSize: "0.75rem", color: "var(--app-text-muted)" }}>{sales.length} ລາຍການ</span>
+                <span style={{ fontSize: "0.75rem", color: "var(--app-text-muted)" }}>{paidSales.length} ລາຍການ</span>
               </div>
 
-              {sales.length === 0 ? (
+              {paidSales.length === 0 ? (
                 <EmptyState icon="📋" title="ບໍ່ມີລາຍການຂາຍໃນຊ່ວງວັນທີນີ້" />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                  {sales.map((sale) => {
+                  {paidSales.map((sale) => {
                     const qty = sale.items.reduce((s, i) => s + i.quantity, 0);
-                    const badge = PAYMENT_BADGE[sale.paymentType];
+                    const badge = PAYMENT_BADGE[sale.paymentType!]; // paidSales guarantees non-null
                     const hasLoss = sale.items.some(
                       (i) => !i.isGift && i.costPrice != null && i.unitPrice < i.costPrice
                     );
@@ -658,8 +663,8 @@ const SalesHistory: React.FC = () => {
                 📅 {fmtDateTime(selectedSale.createdAt)}
               </span>
               <span style={{
-                background: PAYMENT_BADGE[selectedSale.paymentType].bg,
-                color: PAYMENT_BADGE[selectedSale.paymentType].color,
+                background: PAYMENT_BADGE[selectedSale.paymentType!].bg, // selectedSale is only ever set from paidSales
+                color: PAYMENT_BADGE[selectedSale.paymentType!].color,
                 borderRadius: 8, padding: "4px 12px", fontWeight: 700, fontSize: "0.85rem",
               }}>
                 {selectedSale.paymentType === "cash" ? "💵 ເງິນສົດ"
@@ -676,7 +681,7 @@ const SalesHistory: React.FC = () => {
 
             {/* Items */}
             <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "0.85rem", color: "var(--app-text-secondary)" }}>
-              ລາຍການສິນຄ້າ
+              ລາຍການເມນູ
             </p>
             <div style={{ borderRadius: 12, overflow: "hidden", background: "var(--app-surface)", boxShadow: "0 2px 10px rgba(0,0,0,0.07)", marginBottom: 16 }}>
               {(() => {
@@ -963,7 +968,7 @@ const SalesHistory: React.FC = () => {
         header={deleteRestoreStock ? "ຍົກເລີກການຂາຍ" : "ລຶບປະຫວັດ"}
         message={
           deleteTarget
-            ? `ລາຍການ ${fmtK(deleteTarget.total)} ກີບ — ${deleteRestoreStock ? "ສິນຄ້າຈະຄືນສູ່ສະຕັອກ" : "ຈະບໍ່ຄືນສະຕັອກ, ລຶບຖາວອນ"}`
+            ? `ລາຍການ ${fmtK(deleteTarget.total)} ກີບ — ${deleteRestoreStock ? "ເມນູຈະຄືນສູ່ສະຕັອກ" : "ຈະບໍ່ຄືນສະຕັອກ, ລຶບຖາວອນ"}`
             : ""
         }
         buttons={[
@@ -982,7 +987,7 @@ const SalesHistory: React.FC = () => {
         header={itemRestoreStock ? "ຍົກເລີກລາຍການ" : "ລຶບປະຫວັດລາຍການ"}
         message={
           removeItemIdx !== null && selectedSale
-            ? `${selectedSale.items[removeItemIdx].productName} ×${selectedSale.items[removeItemIdx].quantity} — ${itemRestoreStock ? "ສິນຄ້າຈະຄືນສູ່ສະຕັອກ" : "ຈະບໍ່ຄືນສະຕັອກ, ລຶບຖາວອນ"}`
+            ? `${selectedSale.items[removeItemIdx].productName} ×${selectedSale.items[removeItemIdx].quantity} — ${itemRestoreStock ? "ເມນູຈະຄືນສູ່ສະຕັອກ" : "ຈະບໍ່ຄືນສະຕັອກ, ລຶບຖາວອນ"}`
             : ""
         }
         buttons={
@@ -1071,6 +1076,7 @@ const SalesHistory: React.FC = () => {
         buttons={["ຕົກລົງ"]}
         onDidDismiss={() => setEditPriceError(null)}
       />
+
     </IonPage>
   );
 };

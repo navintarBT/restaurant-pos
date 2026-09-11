@@ -100,7 +100,7 @@ const Login: React.FC = () => {
               Minny ONE
             </h1>
             <p style={{ margin: "6px 0 0", color: "#b45309", fontSize: "1rem" }}>
-              ລະບົບຂາຍສິນຄ້າ
+              ລະບົບຂາຍອາຫານ
             </p>
           </div>
 

@@ -260,7 +260,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
         <div style={{ padding: "4px 16px 32px" }}>
           {filteredProducts.length === 0 && (
             <p style={{ textAlign: "center", color: "var(--app-text-muted)", padding: "24px 0", fontSize: "0.85rem" }}>
-              ບໍ່ມີສິນຄ້າໃນໝວດນີ້
+              ບໍ່ມີເມນູໃນໝວດນີ້
             </p>
           )}
           {filteredProducts.map((p) => (
@@ -277,7 +277,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
             >
               {p.photoUrl
                 ? <img src={p.photoUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 10, flexShrink: 0 }} />
-                : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--app-accent-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 22 }}>👕</div>
+                : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--app-accent-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 22 }}>🍽️</div>
               }
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color)" }}>{p.name}</p>
@@ -313,7 +313,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
               )}
             </IonButtons>
             <IonTitle style={{ fontWeight: 700 }}>
-              {activeTab === "return" ? "ຕີກັບສິນຄ້າ" : "ຍ້າຍເຄື່ອງ"}
+              {activeTab === "return" ? "ຕີກັບເມນູ" : "ຍ້າຍເຄື່ອງ"}
             </IonTitle>
             <IonButtons slot="end">
               <IonButton onClick={() => isReturnStep ? setRHistoryOpen(true) : setTHistoryOpen(true)}>
@@ -325,7 +325,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
           {/* Tab selector */}
           <div style={{ display: "flex", padding: "0 16px 10px", gap: 8, background: "var(--ion-toolbar-background, #fff)" }}>
             {(["return", "transfer"] as Tab[]).map((tab) => {
-              const label = tab === "return" ? "ຕີກັບສິນຄ້າ" : "ຍ້າຍເຄື່ອງ";
+              const label = tab === "return" ? "ຕີກັບເມນູ" : "ຍ້າຍເຄື່ອງ";
               const accent = tab === "return" ? "var(--ion-color-primary)" : "var(--app-info)";
               const isActive = activeTab === tab;
               return (
@@ -355,7 +355,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
               {rStep === "product" && (
                 <>
                   <p style={{ margin: "12px 16px 4px", fontSize: "0.82rem", color: "var(--app-text-secondary)" }}>
-                    ເລືອກສິນຄ້າທີ່ຕ້ອງການຕີກັບ
+                    ເລືອກເມນູທີ່ຕ້ອງການຕີກັບ
                   </p>
                   <ProductList onSelect={(p) => { setRProduct(p); setRQtys({}); setRPayment("cash"); setRStep("detail"); }} />
                 </>
@@ -365,7 +365,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
                     {rProduct.photoUrl
                       ? <img src={rProduct.photoUrl} alt={rProduct.name} loading="lazy" decoding="async" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 12, flexShrink: 0 }} />
-                      : <div style={{ width: 48, height: 48, borderRadius: 12, background: "var(--app-accent-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 24 }}>👕</div>
+                      : <div style={{ width: 48, height: 48, borderRadius: 12, background: "var(--app-accent-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 24 }}>🍽️</div>
                     }
                     <div>
                       <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: "var(--ion-text-color)" }}>{rProduct.name}</p>
@@ -417,7 +417,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
               {tStep === "product" && (
                 <>
                   <p style={{ margin: "12px 16px 4px", fontSize: "0.82rem", color: "var(--app-text-secondary)" }}>
-                    ເລືອກສິນຄ້າທີ່ຕ້ອງການຍ້າຍຈາກສາງ
+                    ເລືອກເມນູທີ່ຕ້ອງການຍ້າຍຈາກສາງ
                   </p>
                   <ProductList onSelect={(p) => { setTProduct(p); setTQtys({}); setTNote(""); setTStep("detail"); }} />
                 </>

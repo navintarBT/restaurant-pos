@@ -43,7 +43,7 @@ const CheckoutModal: React.FC<Props> = ({ isOpen, onDismiss, onSuccess }) => {
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "ເກີດຂໍ້ຜິດພາດ";
-      setError(msg === "Insufficient stock" ? "ສິນຄ້າບໍ່ພໍຂາຍ ກະລຸນາກວດສອບສະຕ໋ອກ" : msg);
+      setError(msg === "Insufficient stock" ? "ເມນູບໍ່ພໍຂາຍ ກະລຸນາກວດສອບສະຕ໋ອກ" : msg);
     } finally {
       setBusy(false);
     }

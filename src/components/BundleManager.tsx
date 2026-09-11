@@ -136,7 +136,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
 
   return (
     <>
-      {/* ── Bundle list (inline — rendered as the "ສິນຄ້າເປັນຊຸດ" tab of the Products page) ── */}
+      {/* ── Bundle list (inline — rendered as the "ຊຸດເມນູ" tab of the Products page) ── */}
       {loading && (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
           <IonSpinner name="crescent" color="primary" />
@@ -252,7 +252,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
             {/* Items */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <IonLabel style={{ fontWeight: 700, color: "var(--app-text-secondary)", fontSize: "0.85rem" }}>
-                ສິນຄ້າໃນຊຸດ{formItems.length > 0 ? ` (${formItems.length})` : ""}
+                ເມນູໃນຊຸດ{formItems.length > 0 ? ` (${formItems.length})` : ""}
                 <span style={{ color: "var(--app-text-muted)", fontWeight: 400, fontSize: "0.75rem", marginLeft: 6 }}>
                   ຢ່າງໜ້ອຍ 2 ລາຍການ
                 </span>
@@ -266,7 +266,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
 
             {formItems.length === 0 && (
               <div style={{ textAlign: "center", padding: "20px 0", color: "var(--app-text-muted)", fontSize: "0.82rem" }}>
-                ຍັງບໍ່ມີສິນຄ້າ
+                ຍັງບໍ່ມີເມນູ
               </div>
             )}
 
@@ -344,7 +344,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
           <div style={{ padding: "12px 16px 28px", background: "var(--ion-item-background, #fff)", borderTop: "1px solid var(--ion-color-step-150, var(--app-border))" }}>
             {formItems.length < 2 && formItems.length > 0 && (
               <p style={{ margin: "0 0 10px", textAlign: "center", fontSize: "0.8rem", color: "var(--app-text-muted)" }}>
-                ຕ້ອງມີສິນຄ້າຢ່າງໜ້ອຍ 2 ລາຍການ
+                ຕ້ອງມີເມນູຢ່າງໜ້ອຍ 2 ລາຍການ
               </p>
             )}
             <IonButton expand="block" onClick={handleSave} disabled={!canSave || saving || uploading}
@@ -365,7 +365,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
         <IonHeader>
           <IonToolbar>
             <IonTitle style={{ fontWeight: 700, fontSize: "0.95rem" }}>
-              ເລືອກສິນຄ້າ{formItems.length > 0 ? ` (${formItems.length})` : ""}
+              ເລືອກເມນູ{formItems.length > 0 ? ` (${formItems.length})` : ""}
             </IonTitle>
             <IonButtons slot="end">
               <IonButton strong onClick={() => setPickerOpen(false)} style={{ "--color": "#ffffff" }}>
@@ -400,10 +400,10 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
           )}
           <div style={{ padding: "8px 16px 24px" }}>
             {products.length === 0 && (
-              <p style={{ textAlign: "center", color: "var(--app-text-muted)", padding: 32 }}>ບໍ່ມີສິນຄ້າ</p>
+              <p style={{ textAlign: "center", color: "var(--app-text-muted)", padding: 32 }}>ບໍ່ມີເມນູ</p>
             )}
             {pickerCat !== "all" && pickerProducts.length === 0 && (
-              <p style={{ textAlign: "center", color: "var(--app-text-muted)", padding: "16px 0", fontSize: "0.85rem" }}>ບໍ່ມີສິນຄ້າໃນໝວດນີ້</p>
+              <p style={{ textAlign: "center", color: "var(--app-text-muted)", padding: "16px 0", fontSize: "0.85rem" }}>ບໍ່ມີເມນູໃນໝວດນີ້</p>
             )}
             {pickerProducts.map((p) => {
               const selected = formItems.some((i) => i.productId === p.id);
@@ -423,7 +423,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
                     {p.photoUrl
                       ? <img src={p.photoUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: 38, height: 38, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />
                       : <div style={{ width: 38, height: 38, borderRadius: 8, background: "var(--app-accent-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          <span style={{ fontSize: 20 }}>👕</span>
+                          <span style={{ fontSize: 20 }}>🍽️</span>
                         </div>
                     }
                     <div>

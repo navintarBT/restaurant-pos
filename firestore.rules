@@ -90,7 +90,11 @@ service cloud.firestore {
     // client-side-only check that anyone talking to Firestore directly
     // (bypassing the app) could ignore.
     match /shops/{shopId} {
-      allow read: if isControlAdmin() || isShopMember(shopId);
+      // Any authenticated session — including an anonymous customer viewing
+      // a public /order/... menu — may read a shop's basic profile. Nothing
+      // sensitive lives on this doc; tenant/billing data stays gated in
+      // tenants/{shopId}.
+      allow read: if isAnyAuthed();
       allow create, delete: if isControlAdmin();
       allow update: if isControlAdmin() || (
         isTenantActive(shopId)
@@ -104,7 +108,8 @@ service cloud.firestore {
       );
 
       match /products/{productId} {
-        allow read:   if isControlAdmin() || isShopMember(shopId);
+        // Public menu read (see shops/{shopId} above — same reasoning).
+        allow read:   if isAnyAuthed();
         allow create: if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'));
         // Selling (recordSale) and cancelling/editing a sale (deleteSale,
         // removeItemFromSale) adjust product stock as part of their
@@ -120,23 +125,71 @@ service cloud.firestore {
         allow delete: if isTenantActive(shopId) && isShopOwner(shopId);
       }
 
+      // A per-visit QR/barcode token. Staff open one per table (or the app
+      // reuses an already-open one); the public /order/... page resolves its
+      // `code` to confirm the table is still open before letting a customer
+      // submit anything. Closing the bill flips status to "closed", which
+      // the sales create rule below checks — the code stops working the
+      // instant that happens.
+      match /tableSessions/{sessionId} {
+        allow read:           if isAnyAuthed();
+        allow create, update: if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'));
+        allow delete:         if false;
+      }
+
       match /sales/{saleId} {
         allow read:   if isControlAdmin() || isShopMember(shopId);
-        allow create: if isTenantActive(shopId) && isShopMember(shopId) && validSale(request.resource.data);
-        // Price edit / split-price / partial item removal (SalesHistory) only ever
-        // touch `items` + `total` — mirrors the UI gate (canEditCartPrice for price
-        // edits, canDeleteSales for item removal); everything else on a recorded
-        // sale (paymentType, sellerUid, createdAt, ...) stays immutable.
-        allow update: if (
-            isControlAdmin()
-            || (isTenantActive(shopId) && (
-              isShopOwner(shopId)
-              || (isShopMember(shopId) && (hasStaffPermission(shopId, 'canEditCartPrice') || hasStaffPermission(shopId, 'canDeleteSales')))
-            ))
+        // Three ways a sale doc can be created:
+        //  - validSale: instant-checkout (Sell.tsx), paid immediately.
+        //  - validOrder by staff: dine-in order taken on the customer's behalf.
+        //  - validOrder by anyone holding a currently-open table session's
+        //    code: the public QR ordering page — no shop membership required,
+        //    gated instead on sessionIsOpen() so a closed-out table can't
+        //    receive new charges even if someone replays the old QR image.
+        allow create: if isTenantActive(shopId) && (
+          (isShopMember(shopId) && validSale(request.resource.data))
+          || (isShopMember(shopId) && validOrder(request.resource.data) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders')))
+          || (
+            isAnyAuthed()
+            && validOrder(request.resource.data)
+            && 'tableSessionId' in request.resource.data
+            && sessionIsOpen(shopId, request.resource.data.tableSessionId)
           )
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items', 'total'])
-          && request.resource.data.total is number
-          && request.resource.data.total >= 0;
+        );
+        // Every allowed update touches a distinct, narrow field set — mirrors
+        // the UI gates exactly, and each stage of the dine-in lifecycle can
+        // only ever move forward one step, never skip ahead or backward.
+        allow update: if isControlAdmin() || (isTenantActive(shopId) && (
+          // Price edit / split-price / partial item removal (SalesHistory)
+          (
+            (isShopOwner(shopId) || (isShopMember(shopId) && (hasStaffPermission(shopId, 'canEditCartPrice') || hasStaffPermission(shopId, 'canDeleteSales'))))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items', 'total'])
+            && request.resource.data.total is number
+            && request.resource.data.total >= 0
+          )
+          // Kitchen: pending -> cooking -> ready
+          || (
+            (isShopOwner(shopId) || hasStaffPermission(shopId, 'canCook'))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && (
+              (resource.data.status == 'pending' && request.resource.data.status == 'cooking')
+              || (resource.data.status == 'cooking' && request.resource.data.status == 'ready')
+            )
+          )
+          // Expedite: ready -> served
+          || (
+            (isShopOwner(shopId) || hasStaffPermission(shopId, 'canExpedite'))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'servedAt'])
+            && resource.data.status == 'ready' && request.resource.data.status == 'served'
+          )
+          // Close bill: served -> paid (records the payment)
+          || (
+            (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'paymentType', 'paidAt'])
+            && resource.data.status != 'paid' && request.resource.data.status == 'paid'
+            && request.resource.data.paymentType in ['cash', 'qr', 'cod']
+          )
+        ));
         allow delete: if isControlAdmin()
           || (isTenantActive(shopId) && (
             isShopOwner(shopId)
@@ -241,6 +294,13 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Covers regular staff/owner logins AND Firebase anonymous auth sessions
+    // (the public QR ordering page signs in anonymously specifically so this
+    // is true for it) — deliberately NOT scoped to any shop.
+    function isAnyAuthed() {
+      return request.auth != null;
+    }
+
     function isSuperAdmin() {
       return request.auth != null && getUserData().role == 'superadmin';
     }
@@ -295,7 +355,28 @@ service cloud.firestore {
       return data.keys().hasAll(['items', 'total', 'paymentType', 'createdAt'])
         && data.total is number
         && data.total > 0
-        && (data.paymentType == 'cash' || data.paymentType == 'qr' || data.paymentType == 'cod');
+        && (data.paymentType == 'cash' || data.paymentType == 'qr' || data.paymentType == 'cod')
+        && data.status == 'paid';
+    }
+
+    // A dine-in order: reserves stock like a sale but isn't paid yet. Starts
+    // "pending" (needs the kitchen) or "ready" (skips straight to Expedite —
+    // e.g. drinks), moves through the kitchen, and only becomes billable via
+    // the sales update rule's close-bill branch.
+    function validOrder(data) {
+      return data.keys().hasAll(['items', 'total', 'status', 'createdAt'])
+        && data.total is number
+        && data.total > 0
+        && (data.status == 'pending' || data.status == 'ready')
+        && data.paymentType == null;
+    }
+
+    // A table's QR code only works while its session is still open — closing
+    // the bill (CheckBill.tsx) flips this to false, so a stale/reused code
+    // can't charge anything to an already-settled table.
+    function sessionIsOpen(shopId, sessionId) {
+      let path = /databases/$(database)/documents/shops/$(shopId)/tableSessions/$(sessionId);
+      return exists(path) && get(path).data.status == 'open';
     }
 
     function validReturn(data) {

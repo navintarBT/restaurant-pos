@@ -578,8 +578,8 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
             {giftProducts.length === 0 && (
               <p style={{ textAlign: "center", color: "var(--app-text-muted)", padding: "32px 0" }}>
                 {giftEligibleProducts.length === 0
-                  ? "ຍັງບໍ່ມີສິນຄ້າທີ່ຕັ້ງເປັນຂອງແຖມໄດ້ — ໄປເປີດທີ່ໜ້າສິນຄ້າ"
-                  : "ບໍ່ມີສິນຄ້າໃນໝວດນີ້"}
+                  ? "ຍັງບໍ່ມີເມນູທີ່ຕັ້ງເປັນຂອງແຖມໄດ້ — ໄປເປີດທີ່ໜ້າເມນູ"
+                  : "ບໍ່ມີເມນູໃນໝວດນີ້"}
               </p>
             )}
             {giftProducts.map((p) => {
@@ -600,7 +600,7 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
                 >
                   {p.photoUrl
                     ? <img src={p.photoUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 10, flexShrink: 0 }} />
-                    : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--app-accent-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 22 }}>👕</div>
+                    : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--app-accent-surface)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 22 }}>🍽️</div>
                   }
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color)" }}>{p.name}</p>

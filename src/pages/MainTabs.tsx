@@ -28,9 +28,13 @@ import {
   peopleOutline,
   personCircleOutline,
   walletOutline,
-  shirtOutline,
+  restaurantOutline,
   timeOutline,
   swapHorizontalOutline,
+  receiptOutline,
+  flameOutline,
+  checkmarkDoneOutline,
+  cashOutline,
 } from "ionicons/icons";
 import { CartProvider } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
@@ -44,6 +48,10 @@ const Finance = lazy(() => import("./Finance"));
 const SalesHistory = lazy(() => import("./SalesHistory"));
 const ShopProfileSettings = lazy(() => import("./ShopProfileSettings"));
 const StaffSettings = lazy(() => import("./StaffSettings"));
+const TakeOrder = lazy(() => import("./TakeOrder"));
+const Kitchen = lazy(() => import("./Kitchen"));
+const Expedite = lazy(() => import("./Expedite"));
+const CheckBill = lazy(() => import("./CheckBill"));
 
 function RouteFallback() {
   return (
@@ -103,6 +111,10 @@ const MainTabs: React.FC = () => {
     import("./SalesHistory");
     import("./ShopProfileSettings");
     import("./StaffSettings");
+    import("./TakeOrder");
+    import("./Kitchen");
+    import("./Expedite");
+    import("./CheckBill");
   }, []);
 
   return (
@@ -158,6 +170,48 @@ const MainTabs: React.FC = () => {
 
             {/* ── Menu sections ── */}
             <div style={{ flex: 1, padding: "8px 0" }}>
+              {(permissions.canTakeOrders || permissions.canCook || permissions.canExpedite) && (
+                <>
+                  <div style={{ padding: "12px 18px 6px", fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>
+                    ລະບົບສັ່ງອາຫານ
+                  </div>
+                  <IonList lines="none">
+                    {permissions.canTakeOrders && (
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/take-order" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={receiptOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ຮັບອໍເດີ້</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                    )}
+                    {permissions.canCook && (
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/kitchen" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={flameOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ຫ້ອງຄົວ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                    )}
+                    {permissions.canExpedite && (
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/expedite" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={checkmarkDoneOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ຈັດເສີບ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                    )}
+                    {permissions.canTakeOrders && (
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/check-bill" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={cashOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ເຊັກບິນ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                    )}
+                  </IonList>
+                </>
+              )}
+
               {role === "customer" && (
                 <>
                   <div style={{ padding: "12px 18px 6px", fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>
@@ -212,7 +266,7 @@ const MainTabs: React.FC = () => {
               <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: "1rem", lineHeight: 1 }}>
                 <span style={{ color: "var(--ion-text-color)" }}>Minny</span><span style={{ color: "var(--ion-color-primary)" }}>One</span>
               </div>
-              <p style={{ margin: "4px 0 0", fontSize: "0.68rem", color: "var(--app-text-muted)" }}>ລະບົບຂາຍສິນຄ້າ</p>
+              <p style={{ margin: "4px 0 0", fontSize: "0.68rem", color: "var(--app-text-muted)" }}>ລະບົບຂາຍອາຫານ</p>
             </div>
           </div>
         </IonContent>
@@ -302,6 +356,26 @@ const MainTabs: React.FC = () => {
           <Route exact path="/tabs/staff">
             <Suspense fallback={<RouteFallback />}><StaffSettings /></Suspense>
           </Route>
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/take-order">
+              <Suspense fallback={<RouteFallback />}><TakeOrder /></Suspense>
+            </Route>
+          )}
+          {permissions.canCook && (
+            <Route exact path="/tabs/kitchen">
+              <Suspense fallback={<RouteFallback />}><Kitchen /></Suspense>
+            </Route>
+          )}
+          {permissions.canExpedite && (
+            <Route exact path="/tabs/expedite">
+              <Suspense fallback={<RouteFallback />}><Expedite /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/check-bill">
+              <Suspense fallback={<RouteFallback />}><CheckBill /></Suspense>
+            </Route>
+          )}
           <Route exact path="/tabs"><Redirect to="/tabs/sell" /></Route>
         </IonRouterOutlet>
 
@@ -311,8 +385,8 @@ const MainTabs: React.FC = () => {
             <IonLabel>ຂາຍ</IonLabel>
           </IonTabButton>
           <IonTabButton tab="products" href="/tabs/products">
-            <IonIcon icon={shirtOutline} />
-            <IonLabel>ສິນຄ້າ</IonLabel>
+            <IonIcon icon={restaurantOutline} />
+            <IonLabel>ເມນູ</IonLabel>
             {alertCount > 0 && <IonBadge color="danger">{alertCount}</IonBadge>}
           </IonTabButton>
           <IonTabButton tab="history" href="/tabs/history">

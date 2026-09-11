@@ -52,11 +52,13 @@ export default function AllShopsDashboard({ shops, onBack }: Props) {
       const [f, t] = parseRange(from, to);
       const perShop = await Promise.all(
         shops.map(async (shop) => {
-          const [sales, expenses, incomes] = await Promise.all([
+          const [rawSales, expenses, incomes] = await Promise.all([
             getSalesByDateRange(shop.id, f, t),
             getExpensesByDateRange(shop.id, f, t),
             getIncomesByDateRange(shop.id, f, t),
           ]);
+          // Dine-in orders not yet billed (status !== "paid") aren't revenue yet.
+          const sales = rawSales.filter((sale) => sale.status === "paid");
           const revenue = sales.reduce((s, sale) => s + sale.total, 0);
           const cost = sales.reduce(
             (s, sale) => s + sale.items.reduce((is, item) => is + (item.costPrice ?? 0) * item.quantity, 0),
@@ -176,7 +178,7 @@ export default function AllShopsDashboard({ shops, onBack }: Props) {
                     <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--ion-text-color)" }}>{fmtK(totalRevenue)} ກີບ</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: "0.78rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>🏷️ ຕົ້ນທຶນສິນຄ້າ</span>
+                    <span style={{ fontSize: "0.78rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>🏷️ ຕົ້ນທຶນເມນູ</span>
                     <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--app-cost)" }}>−{fmtK(totalCost)} ກີບ</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>

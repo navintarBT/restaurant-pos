@@ -10,9 +10,11 @@ import {
   Timestamp,
   runTransaction,
   writeBatch,
+  updateDoc,
+  onSnapshot,
 } from "firebase/firestore";
 import { db } from "../firebase";
-import type { Sale, SaleItem } from "./types";
+import type { Sale, SaleItem, OrderStatus, PaymentType } from "./types";
 
 interface StockChange {
   productId: string;
@@ -43,6 +45,48 @@ function productsCol(shopId: string) {
   return collection(db, "shops", shopId, "products");
 }
 
+/** Shared by recordSale and createOrder: validate + decrement stock for `items` inside an open transaction. */
+async function applyStockChangesInTransaction(
+  tx: import("firebase/firestore").Transaction,
+  shopId: string,
+  items: SaleItem[]
+): Promise<void> {
+  const changes = buildStockChanges(items);
+
+  // Group stock changes by productId so each product is read exactly once
+  const byProduct = new Map<string, StockChange[]>();
+  for (const ch of changes) {
+    const arr = byProduct.get(ch.productId) ?? [];
+    arr.push(ch);
+    byProduct.set(ch.productId, arr);
+  }
+
+  // Phase 1: all reads
+  const snaps = new Map<string, any>();
+  for (const productId of byProduct.keys()) {
+    const ref = doc(productsCol(shopId), productId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error(`Product ${productId} not found`);
+    snaps.set(productId, snap);
+  }
+
+  // Phase 2: validate + all writes
+  for (const [productId, productChanges] of byProduct) {
+    const snap = snaps.get(productId)!;
+    const ref = doc(productsCol(shopId), productId);
+    const variants: any[] = [...(snap.data().variants ?? [])];
+    for (const ch of productChanges) {
+      const idx = variants.findIndex(
+        (v) => v.size === ch.size && v.color === ch.color
+      );
+      if (idx === -1) throw new Error("Variant not found");
+      if (variants[idx].stock < ch.qty) throw new Error("Insufficient stock");
+      variants[idx] = { ...variants[idx], stock: variants[idx].stock - ch.qty };
+    }
+    tx.update(ref, { variants });
+  }
+}
+
 /**
  * Record a sale and decrement stock.
  * Online: uses a transaction to verify stock atomically.
@@ -66,43 +110,10 @@ export async function recordSale(
 
   try {
     return await runTransaction(db, async (tx) => {
-      const changes = buildStockChanges(items);
-
-      // Group stock changes by productId so each product is read exactly once
-      const byProduct = new Map<string, StockChange[]>();
-      for (const ch of changes) {
-        const arr = byProduct.get(ch.productId) ?? [];
-        arr.push(ch);
-        byProduct.set(ch.productId, arr);
-      }
-
-      // Phase 1: all reads
-      const snaps = new Map<string, any>();
-      for (const productId of byProduct.keys()) {
-        const ref = doc(productsCol(shopId), productId);
-        const snap = await tx.get(ref);
-        if (!snap.exists()) throw new Error(`Product ${productId} not found`);
-        snaps.set(productId, snap);
-      }
-
-      // Phase 2: validate + all writes
-      for (const [productId, productChanges] of byProduct) {
-        const snap = snaps.get(productId)!;
-        const ref = doc(productsCol(shopId), productId);
-        const variants: any[] = [...(snap.data().variants ?? [])];
-        for (const ch of productChanges) {
-          const idx = variants.findIndex(
-            (v) => v.size === ch.size && v.color === ch.color
-          );
-          if (idx === -1) throw new Error("Variant not found");
-          if (variants[idx].stock < ch.qty) throw new Error("Insufficient stock");
-          variants[idx] = { ...variants[idx], stock: variants[idx].stock - ch.qty };
-        }
-        tx.update(ref, { variants });
-      }
+      await applyStockChangesInTransaction(tx, shopId, items);
 
       const saleRef = doc(salesCol(shopId));
-      tx.set(saleRef, { items, total, paymentType, sellerUid, sellerName, createdAt: Timestamp.now() });
+      tx.set(saleRef, { items, total, paymentType, status: "paid", sellerUid, sellerName, createdAt: Timestamp.now() });
       return saleRef.id;
     });
   } catch (err: unknown) {
@@ -163,6 +174,7 @@ async function recordSaleProvisional(
     items,
     total,
     paymentType,
+    status: "paid",
     sellerUid,
     sellerName,
     createdAt: Timestamp.now(),
@@ -176,6 +188,130 @@ async function recordSaleProvisional(
   // UI the same way the transaction did.
   batch.commit().catch(() => {});
   return saleRef.id;
+}
+
+/**
+ * Dine-in order: reserves stock immediately (same transaction as recordSale)
+ * but records no payment yet. Splits into up to two tickets by
+ * item.needsKitchen — food goes to Kitchen (status "pending"); everything
+ * else skips the cook and starts already "ready" for Expedite. Both tickets
+ * share the same tableSessionId so Check Bill can sum them together later.
+ */
+export async function createOrder(
+  shopId: string,
+  items: SaleItem[],
+  tableSessionId: string,
+  tableLabel: string,
+  sellerUid: string,
+  sellerName: string
+): Promise<void> {
+  const kitchenItems = items.filter((i) => i.needsKitchen !== false);
+  const directItems = items.filter((i) => i.needsKitchen === false);
+
+  await runTransaction(db, async (tx) => {
+    await applyStockChangesInTransaction(tx, shopId, items);
+
+    const now = Timestamp.now();
+    const base = { paymentType: null, tableSessionId, tableLabel, sellerUid, sellerName, createdAt: now };
+
+    if (kitchenItems.length > 0) {
+      tx.set(doc(salesCol(shopId)), {
+        ...base,
+        items: kitchenItems,
+        total: kitchenItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0),
+        status: "pending",
+      });
+    }
+    if (directItems.length > 0) {
+      tx.set(doc(salesCol(shopId)), {
+        ...base,
+        items: directItems,
+        total: directItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0),
+        status: "ready",
+      });
+    }
+  });
+}
+
+function saleFromDoc(d: import("firebase/firestore").QueryDocumentSnapshot): Sale {
+  const data = d.data();
+  return {
+    id: d.id,
+    ...data,
+    createdAt: (data.createdAt as Timestamp).toDate(),
+    servedAt: data.servedAt instanceof Timestamp ? data.servedAt.toDate() : undefined,
+  } as Sale;
+}
+
+/** Kitchen/expedite screens: fetch open dine-in orders in any of `statuses`. */
+export async function getOpenOrders(shopId: string, statuses: OrderStatus[]): Promise<Sale[]> {
+  const q = query(salesCol(shopId), where("status", "in", statuses), orderBy("createdAt", "asc"));
+  const snap = await getDocs(q);
+  return snap.docs.map(saleFromDoc);
+}
+
+/**
+ * Realtime version of getOpenOrders — Kitchen/Expedite stay subscribed while
+ * the screen is open so a new order appears (and can trigger a sound alert)
+ * without the cook/expediter having to leave and re-enter the tab or pull to
+ * refresh. Returns an unsubscribe function; call it on unmount.
+ */
+export function subscribeToOpenOrders(
+  shopId: string,
+  statuses: OrderStatus[],
+  callback: (orders: Sale[]) => void
+): () => void {
+  const q = query(salesCol(shopId), where("status", "in", statuses), orderBy("createdAt", "asc"));
+  return onSnapshot(q, (snap) => callback(snap.docs.map(saleFromDoc)));
+}
+
+/** Cook (pending→cooking, cooking→ready) / expediter (ready→served) advance an order one step. */
+export async function advanceOrderStatus(
+  shopId: string,
+  saleId: string,
+  next: OrderStatus
+): Promise<void> {
+  const extra = next === "served" ? { servedAt: Timestamp.now() } : {};
+  await updateDoc(doc(salesCol(shopId), saleId), { status: next, ...extra });
+}
+
+/**
+ * Server/owner closes a table's bill: every ticket the table accumulated
+ * (possibly several rounds — see getOrdersBySession) is marked paid together
+ * in one batch, all under the same payment type.
+ */
+export async function closeBill(
+  shopId: string,
+  saleIds: string[],
+  paymentType: PaymentType
+): Promise<void> {
+  const batch = writeBatch(db);
+  const paidAt = Timestamp.now();
+  for (const saleId of saleIds) {
+    batch.update(doc(salesCol(shopId), saleId), { paymentType, status: "paid", paidAt });
+  }
+  await batch.commit();
+}
+
+/**
+ * Check Bill screen: every ticket belonging to one table session (a session
+ * only ever has a handful, so filtering "not paid yet" client-side avoids
+ * needing a composite index for an inequality on top of the equality match).
+ */
+export async function getOrdersBySession(shopId: string, tableSessionId: string): Promise<Sale[]> {
+  const q = query(salesCol(shopId), where("tableSessionId", "==", tableSessionId));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        createdAt: (data.createdAt as Timestamp).toDate(),
+        servedAt: data.servedAt instanceof Timestamp ? data.servedAt.toDate() : undefined,
+      } as Sale;
+    })
+    .filter((sale) => sale.status !== "paid");
 }
 
 export async function getSalesByDateRange(shopId: string, from: Date, to: Date): Promise<Sale[]> {

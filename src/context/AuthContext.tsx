@@ -23,6 +23,9 @@ const OWNER_PERMISSIONS: StaffPermissions = {
   canDeleteSales: true,
   canAddExpenses: true,
   canViewFinance: true,
+  canTakeOrders: true,
+  canCook: true,
+  canExpedite: true,
 };
 
 const DEFAULT_FEATURES: ShopFeatures = {
@@ -86,6 +89,9 @@ const NO_PERMISSIONS: StaffPermissions = {
   canDeleteSales: false,
   canAddExpenses: false,
   canViewFinance: false,
+  canTakeOrders: false,
+  canCook: false,
+  canExpedite: false,
 };
 
 const BLANK_STATE: AuthState = {
@@ -125,6 +131,9 @@ async function loadShopData(user: User, userData: Record<string, unknown>, shopI
         canDeleteSales: sp?.canDeleteSales ?? false,
         canAddExpenses: sp?.canAddExpenses ?? false,
         canViewFinance: sp?.canViewFinance ?? false,
+        canTakeOrders: sp?.canTakeOrders ?? false,
+        canCook: sp?.canCook ?? false,
+        canExpedite: sp?.canExpedite ?? false,
       };
       const dn = su?.displayName as string | undefined;
       if (dn) displayName = dn;
@@ -164,6 +173,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return onAuthStateChanged(auth, async (user) => {
       if (!user) {
         setState({ ...BLANK_STATE });
+        return;
+      }
+
+      // Anonymous sessions (PublicOrder.tsx's QR ordering page) aren't shop
+      // staff/owners — skip the users/{uid} lookup entirely so they don't
+      // trip the "no matching doc -> force sign-out" branch below and lose
+      // the very session Firestore rules need for their order write.
+      if (user.isAnonymous) {
+        setState({ ...BLANK_STATE, user, loading: false });
         return;
       }
 

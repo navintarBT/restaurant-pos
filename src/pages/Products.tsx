@@ -131,7 +131,7 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
       <IonHeader>
         <IonToolbar className="has-shop-tag">
           <div slot="start"><ShopHeaderTag /></div>
-          <IonTitle>ສິນຄ້າ</IonTitle>
+          <IonTitle>ເມນູ</IonTitle>
           <IonButtons slot="end">
             <IonButton onClick={() => setInventoryOpen(true)}>
               <IonIcon slot="icon-only" icon={cubeOutline} />
@@ -166,8 +166,8 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         {isAdmin && (
           <div style={{ display: "flex", gap: 0, margin: "12px 16px 0", borderRadius: 12, background: "var(--ion-color-step-50, var(--app-surface-alt))", padding: 4 }}>
             {([
-              { v: "retail" as const, label: "ສິນຄ້າລາຍຍ່ອຍ" },
-              { v: "bundle" as const, label: "ສິນຄ້າເປັນຊຸດ" },
+              { v: "retail" as const, label: "ເມນູທົ່ວໄປ" },
+              { v: "bundle" as const, label: "ຊຸດເມນູ" },
             ]).map(({ v, label }) => (
               <button
                 key={v}
@@ -244,7 +244,7 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         })()}
 
         {!loading && products.length === 0 && (
-          <EmptyState icon="🛍️" title={isAdmin ? "ກົດ + ເພື່ອເພີ່ມສິນຄ້າທຳອິດ" : "ຍັງບໍ່ມີສິນຄ້າໃນລະບົບ"} />
+          <EmptyState icon="🍽️" title={isAdmin ? "ກົດ + ເພື່ອເພີ່ມເມນູທຳອິດ" : "ຍັງບໍ່ມີເມນູໃນລະບົບ"} />
         )}
 
         {isAdmin && (
@@ -337,7 +337,7 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
 
       <IonAlert
         isOpen={!!deleteTarget}
-        header="ລຶບສິນຄ້າ"
+        header="ລຶບເມນູ"
         message={`ຕ້ອງການລຶບ "${deleteTarget?.name}" ແມ່ນບໍ່?`}
         buttons={[
           { text: "ຍົກເລີກ", role: "cancel", handler: () => setDeleteTarget(null) },

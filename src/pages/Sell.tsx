@@ -288,7 +288,7 @@ const Sell: React.FC = () => {
           </button>
         </div>
 
-        {/* Tab: ສິນຄ້າ / ຊຸດ */}
+        {/* Tab: ເມນູ / ຊຸດ */}
         <div style={{ display: "flex", padding: "10px 12px 4px", gap: 8 }}>
           {(["products", "bundles"] as const).map((tab) => {
             const active = activeTab === tab;
@@ -305,7 +305,7 @@ const Sell: React.FC = () => {
                   boxShadow: active ? "0 2px 8px rgba(224,123,57,0.3)" : "none",
                 }}
               >
-                {tab === "products" ? "ສິນຄ້າ" : "🎁 ຊຸດ"}
+                {tab === "products" ? "ເມນູ" : "🎁 ຊຸດ"}
               </button>
             );
           })}
@@ -354,10 +354,10 @@ const Sell: React.FC = () => {
         {activeTab === "products" && (
           <>
             {!loading && products.length === 0 && (
-              <EmptyState icon="🛍️" title="ຍັງບໍ່ມີສິນຄ້າ" />
+              <EmptyState icon="🍽️" title="ຍັງບໍ່ມີເມນູ" />
             )}
             {!loading && products.length > 0 && filtered.length === 0 && (
-              <EmptyState icon="🔍" title="ບໍ່ມີສິນຄ້າໃນໝວດນີ້" />
+              <EmptyState icon="🔍" title="ບໍ່ມີເມນູໃນໝວດນີ້" />
             )}
             {!loading && filtered.length > 0 && (
               <IonGrid style={{ padding: "12px 8px" }}>
@@ -383,7 +383,7 @@ const Sell: React.FC = () => {
                           <div style={{ fontSize: 38, marginBottom: 6, lineHeight: 1 }}>
                             {p.photoUrl
                               ? <img src={p.photoUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
-                              : "👕"
+                              : "🍽️"
                             }
                           </div>
                           <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color, var(--ion-text-color))", marginBottom: 3, lineHeight: 1.3 }}>
@@ -414,7 +414,7 @@ const Sell: React.FC = () => {
         {activeTab === "bundles" && (
           <>
             {!loading && bundles.length === 0 && (
-              <EmptyState icon="🎁" title="ຍັງບໍ່ມີຊຸດ — ສ້າງໄດ້ທີ່ໜ້າສິນຄ້າ" />
+              <EmptyState icon="🎁" title="ຍັງບໍ່ມີຊຸດ — ສ້າງໄດ້ທີ່ໜ້າເມນູ" />
             )}
             {!loading && bundles.length > 0 && (
               <IonGrid style={{ padding: "12px 8px" }}>
@@ -458,7 +458,7 @@ const Sell: React.FC = () => {
                               padding: "2px 8px", borderRadius: 20,
                               background: "var(--app-danger-surface)", color: "var(--app-danger)",
                             }}>
-                              ສິນຄ້າໝົດ
+                              ເມນູໝົດ
                             </div>
                           )}
                         </button>
@@ -522,7 +522,7 @@ const Sell: React.FC = () => {
         <IonContent>
           <div style={{ padding: "8px 16px 24px" }}>
             <p style={{ margin: "0 0 16px", fontSize: "0.78rem", color: "var(--app-text-secondary)" }}>
-              ເລືອກ variant ໃຫ້ແຕ່ລະສິນຄ້າໃນຊຸດ
+              ເລືອກ variant ໃຫ້ແຕ່ລະເມນູໃນຊຸດ
             </p>
             {bundlePickerTarget?.items.map((item, idx) => {
               const p = productsEffective.find((x) => x.id === item.productId);

@@ -63,7 +63,7 @@ const InventoryReportSheet: React.FC<Props> = ({ isOpen, products, canViewFinanc
     <IonModal isOpen={isOpen} onDidDismiss={onDismiss}>
       <IonHeader>
         <IonToolbar>
-          <IonTitle style={{ fontWeight: 700 }}>ສິນຄ້າຄ້າງ</IonTitle>
+          <IonTitle style={{ fontWeight: 700 }}>ເມນູຄ້າງ</IonTitle>
           <IonButtons slot="end">
             <IonButton onClick={onDismiss}>
               <IonIcon slot="icon-only" icon={closeOutline} />
@@ -103,7 +103,7 @@ const InventoryReportSheet: React.FC<Props> = ({ isOpen, products, canViewFinanc
 
         <div style={{ padding: "8px 14px 24px" }}>
           {rows.length === 0 ? (
-            <EmptyState icon="📦" title="ບໍ່ມີສິນຄ້າ" />
+            <EmptyState icon="📦" title="ບໍ່ມີເມນູ" />
           ) : (
             groups.map((group) => (
               <div key={group.label}>
@@ -136,7 +136,7 @@ const InventoryReportSheet: React.FC<Props> = ({ isOpen, products, canViewFinanc
                             width: 40, height: 40, borderRadius: 10, flexShrink: 0,
                             background: "var(--app-accent-surface)",
                             display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
-                          }}>👕</div>
+                          }}>🍽️</div>
                       }
                       <div style={{
                         flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,

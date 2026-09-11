@@ -4,6 +4,7 @@ import { IonReactRouter } from "@ionic/react-router";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import MainTabs from "./pages/MainTabs";
+import PublicOrder from "./pages/PublicOrder";
 import OfflineBanner from "./components/OfflineBanner";
 import ShopPicker from "./components/ShopPicker";
 
@@ -72,6 +73,9 @@ function AppRoutes() {
           </Route>
           <Route path="/tabs">
             {user ? <MainTabs /> : <Redirect to="/login" />}
+          </Route>
+          <Route exact path="/order/:shopId/:code">
+            <PublicOrder />
           </Route>
           <Route exact path="/">
             <Redirect to={user ? "/tabs" : "/login"} />

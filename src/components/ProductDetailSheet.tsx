@@ -48,7 +48,7 @@ const ProductDetailSheet: React.FC<Props> = ({ product, canViewFinance, onDismis
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 72,
             }}>
-              👕
+              🍽️
             </div>
           )}
         </div>
@@ -103,7 +103,7 @@ const ProductDetailSheet: React.FC<Props> = ({ product, canViewFinance, onDismis
 
           {/* Variants table */}
           <p style={{ margin: "0 0 8px", fontSize: "0.78rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>
-            ລາຍການສີ/ໄຊສ໌
+            ລາຍການຕົວເລືອກ/ຂະໜາດ
           </p>
           <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--app-surface-alt)" }}>
             {/* Table header */}
@@ -111,8 +111,8 @@ const ProductDetailSheet: React.FC<Props> = ({ product, canViewFinance, onDismis
               display: "grid", gridTemplateColumns: "1fr 1fr 80px",
               background: "var(--app-surface-alt)", padding: "8px 14px",
             }}>
-              <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>ໄຊສ໌</span>
-              <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>ສີ</span>
+              <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>ຂະໜາດ</span>
+              <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>ຕົວເລືອກ</span>
               <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)", textAlign: "right" }}>ສະຕ໋ອກ</span>
             </div>
 

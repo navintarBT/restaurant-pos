@@ -60,6 +60,9 @@ export async function getShopUsers(shopId: string): Promise<ShopUser[]> {
         canDeleteSales: p.canDeleteSales ?? false,
         canAddExpenses: p.canAddExpenses ?? false,
         canViewFinance: p.canViewFinance ?? false,
+        canTakeOrders: p.canTakeOrders ?? false,
+        canCook: p.canCook ?? false,
+        canExpedite: p.canExpedite ?? false,
       } : undefined,
     };
   }).sort((a, b) => `${a.role}-${a.email}`.localeCompare(`${b.role}-${b.email}`));
@@ -97,6 +100,9 @@ export async function createStaffUser(
     canDeleteSales: false,
     canAddExpenses: false,
     canViewFinance: false,
+    canTakeOrders: false,
+    canCook: false,
+    canExpedite: false,
   };
 
   const batch = writeBatch(db);

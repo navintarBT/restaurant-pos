@@ -44,7 +44,7 @@ const ProductCard: React.FC<Props> = ({ product, isAdmin, canDelete, canViewFina
             justifyContent: "center",
             fontSize: 44,
           }}>
-            👕
+            🍽️
           </div>
         )}
       </div>

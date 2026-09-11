@@ -34,6 +34,9 @@ interface FormErrors {
   save?: string;
 }
 
+// Field names stay `size`/`color` (data model unchanged) — only the labels
+// shown to the user were renamed for a restaurant menu (size → ຂະໜາດ,
+// color → ຕົວເລືອກ, e.g. spice level / topping / no-ice).
 const emptyVariant = (): ProductVariant => ({ size: "", color: "", stock: 0, minStock: 5 });
 
 const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isOwner = false, onSave, onDismiss, onCategoryChanged, onCategoryRenamed }) => {
@@ -43,6 +46,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
   const [costPrice, setCostPrice] = useState<number>(0);
   const [photoUrl, setPhotoUrl] = useState<string | undefined>(undefined);
   const [canBeGift, setCanBeGift] = useState(false);
+  const [needsKitchen, setNeedsKitchen] = useState(true);
   const [pendingDataUrl, setPendingDataUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [variants, setVariants] = useState<ProductVariant[]>([emptyVariant()]);
@@ -69,6 +73,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
       setCostPrice(cp);
       setPhotoUrl(product?.photoUrl);
       setCanBeGift(product?.canBeGift ?? false);
+      setNeedsKitchen(product?.needsKitchen ?? true);
       setPendingDataUrl(null);
       const vArr = product?.variants.length ? [...product.variants] : [emptyVariant()];
       setVariants(vArr);
@@ -148,7 +153,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
     try {
       const inUse = await isCategoryInUse(shopId, deleteCatTarget.name);
       if (inUse) {
-        setCatError(`ບໍ່ສາມາດລຶບ "${deleteCatTarget.name}" ເພາະມີສິນຄ້າທີ່ໃຊ້ໝວດນີ້ຢູ່`);
+        setCatError(`ບໍ່ສາມາດລຶບ "${deleteCatTarget.name}" ເພາະມີເມນູທີ່ໃຊ້ໝວດນີ້ຢູ່`);
         setDeleteCatTarget(null);
         return;
       }
@@ -167,8 +172,8 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
   async function handleSave() {
     const newErrors: FormErrors = {};
 
-    if (!name.trim()) newErrors.name = "ກະລຸນາໃສ່ຊື່ສິນຄ້າ";
-    if (name.trim().length > 0 && name.trim().length < 2) newErrors.name = "ຊື່ສິນຄ້າຕ້ອງຢ່າງໜ້ອຍ 2 ຕົວອັກສອນ";
+    if (!name.trim()) newErrors.name = "ກະລຸນາໃສ່ຊື່ເມນູ";
+    if (name.trim().length > 0 && name.trim().length < 2) newErrors.name = "ຊື່ເມນູຕ້ອງຢ່າງໜ້ອຍ 2 ຕົວອັກສອນ";
     if (price <= 0) newErrors.price = "ຕ້ອງໃສ່ລາຄາຂາຍ ຫຼາຍກວ່າ 0 ກີບ";
     if (costPrice <= 0) newErrors.cost = "ຕ້ອງໃສ່ລາຄາຕົ້ນທຶນ ຫຼາຍກວ່າ 0 ກີບ";
     if (price > 0 && costPrice > 0 && price < costPrice) {
@@ -184,10 +189,10 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
 
     if (validVariants.length === 0) {
       newErrors.badVariants = badIdxs;
-      newErrors.variantsMsg = "ຕ້ອງມີຢ່າງໜ້ອຍ 1 variant ທີ່ໃສ່ທັງ ໄຊສ໌ ແລະ ສີ";
+      newErrors.variantsMsg = "ຕ້ອງມີຢ່າງໜ້ອຍ 1 variant ທີ່ໃສ່ທັງ ຂະໜາດ ແລະ ຕົວເລືອກ";
     } else if (badIdxs.size > 0) {
       newErrors.badVariants = badIdxs;
-      newErrors.variantsMsg = `${badIdxs.size} variant ຂຽນບໍ່ຄົບ — ກວດ ໄຊສ໌/ສີ ທີ່ຂອບສີແດງ`;
+      newErrors.variantsMsg = `${badIdxs.size} variant ຂຽນບໍ່ຄົບ — ກວດ ຂະໜາດ/ຕົວເລືອກ ທີ່ຂອບສີແດງ`;
     } else {
       // Check duplicates among valid variants
       const seen = new Set<string>();
@@ -206,8 +211,9 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
     const hasBlocker = newErrors.name || newErrors.price || newErrors.cost || newErrors.variantsMsg;
     if (hasBlocker) {
       // The blocking field(s) can be scrolled out of view (e.g. user is down
-      // at the variants section when ຊື່ສິນຄ້າ up top is still empty), which
-      // otherwise makes clicking ບັນທຶກ look like it silently did nothing.
+      // at the variants section when ຊື່ເມນູ up top is still empty), which
+      // otherwise makes clicking ບັນທຶກ look like it silently did nothing
+      // (blocker fields: ຊື່ເມນູ / price / cost / variants).
       contentRef.current?.scrollToTop(300);
       return;
     }
@@ -228,6 +234,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
         photoUrl: finalPhotoUrl,
         variants: validVariants.map(v => ({ ...v, stock: Number(v.stock) || 0 })),
         canBeGift,
+        needsKitchen,
       });
       onDismiss();
     } catch (err) {
@@ -254,7 +261,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
     <IonModal isOpen={isOpen} onDidDismiss={onDismiss}>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>{product ? "ແກ້ໄຂສິນຄ້າ" : "ເພີ່ມສິນຄ້າ"}</IonTitle>
+          <IonTitle>{product ? "ແກ້ໄຂເມນູ" : "ເພີ່ມເມນູ"}</IonTitle>
           <IonButtons slot="start">
             <IonButton onClick={onDismiss} disabled={busy || uploading}>
               <IonIcon slot="icon-only" icon={closeOutline} />
@@ -275,7 +282,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
 
         {/* Image */}
         <div style={{ marginBottom: 16 }}>
-          <p style={{ margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 600, color: "var(--app-text-secondary)" }}>ຮູບສິນຄ້າ</p>
+          <p style={{ margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 600, color: "var(--app-text-secondary)" }}>ຮູບເມນູ</p>
           <ImagePicker
             currentUrl={photoUrl}
             uploading={uploading}
@@ -287,11 +294,11 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
         {/* Name */}
         <IonList lines="full">
           <IonItem>
-            <IonLabel position="stacked" color={errors.name ? "danger" : undefined}>ຊື່ສິນຄ້າ *</IonLabel>
+            <IonLabel position="stacked" color={errors.name ? "danger" : undefined}>ຊື່ເມນູ *</IonLabel>
             <IonInput
               value={name}
               onIonInput={(e) => { setName(e.detail.value ?? ""); clearFieldError("name"); }}
-              placeholder="ເຊັ່ນ: ເສື້ອຍືດ oversize"
+              placeholder="ເຊັ່ນ: ເຝີງົວ, ກາເຟນົມເຢັນ"
               style={{ borderBottom: `2px solid ${errors.name ? "var(--app-danger)" : "transparent"}` }}
             />
           </IonItem>
@@ -362,7 +369,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
               🎁 ໃຫ້ເປັນຂອງແຖມໄດ້
             </p>
             <p style={{ margin: "2px 0 0", fontSize: "0.74rem", color: "var(--app-text-secondary)" }}>
-              ຖ້າເປີດ ຈະເລືອກສິນຄ້ານີ້ເປັນຂອງແຖມໄດ້ຈາກໜ້າກະຕ່າ
+              ຖ້າເປີດ ຈະເລືອກເມນູນີ້ເປັນຂອງແຖມໄດ້ຈາກໜ້າກະຕ່າ
             </p>
           </div>
           <div style={{
@@ -378,13 +385,45 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
           </div>
         </div>
 
+        {/* Needs the kitchen? */}
+        <div
+          onClick={() => setNeedsKitchen((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            margin: "8px 0", padding: "12px 14px", borderRadius: 10,
+            background: needsKitchen ? "var(--app-accent-surface)" : "var(--ion-color-step-50, #f5f5f4)",
+            border: `1.5px solid ${needsKitchen ? "var(--ion-color-primary)" : "var(--ion-color-step-150, var(--app-border))"}`,
+            cursor: "pointer",
+          }}
+        >
+          <div>
+            <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "var(--ion-text-color)" }}>
+              👨‍🍳 ຕ້ອງຜ່ານຄົວ
+            </p>
+            <p style={{ margin: "2px 0 0", fontSize: "0.74rem", color: "var(--app-text-secondary)" }}>
+              ຖ້າປິດ ອໍເດີ້ຈະຂ້າມຫ້ອງຄົວ ໄປພ້ອມເສີບທັນທີ (ເຊັ່ນ: ເຄື່ອງດື່ມ)
+            </p>
+          </div>
+          <div style={{
+            width: 46, height: 26, borderRadius: 13, flexShrink: 0, marginLeft: 12,
+            background: needsKitchen ? "var(--ion-color-primary)" : "var(--ion-color-step-200, #d4d4d0)",
+            position: "relative", transition: "background 0.15s",
+          }}>
+            <div style={{
+              position: "absolute", top: 2, left: needsKitchen ? 22 : 2,
+              width: 22, height: 22, borderRadius: "50%", background: "var(--app-surface)",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.3)", transition: "left 0.15s",
+            }} />
+          </div>
+        </div>
+
         {/* Variants */}
         <IonListHeader style={{ paddingTop: 8 }}>
           <IonLabel>Variants</IonLabel>
         </IonListHeader>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px 60px 44px", gap: 8, padding: "2px 0 4px" }}>
-          {["ໄຊສ໌ *", "ສີ *", "ຈຳນວນ", "ເຕືອນ≤", ""].map((h, idx) => (
+          {["ຂະໜາດ *", "ຕົວເລືອກ *", "ຈຳນວນ", "ເຕືອນ≤", ""].map((h, idx) => (
             <span key={idx} style={{ fontSize: "0.7rem", color: "var(--app-text-muted)", fontWeight: 600, textAlign: "center" }}>{h}</span>
           ))}
         </div>
@@ -399,7 +438,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
             <div key={i}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px 60px 44px", gap: 8, padding: "4px 0" }}>
                 <IonInput
-                  fill="outline" placeholder="ໄຊສ໌" value={v.size}
+                  fill="outline" placeholder="ຂະໜາດ" value={v.size}
                   onIonInput={(e) => {
                     updateVariant(i, "size", e.detail.value ?? "");
                     if (errors.badVariants?.has(i) && e.detail.value?.trim()) {
@@ -418,7 +457,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
                   }}
                 />
                 <IonInput
-                  fill="outline" placeholder="ສີ" value={v.color}
+                  fill="outline" placeholder="ຕົວເລືອກ" value={v.color}
                   onIonInput={(e) => {
                     updateVariant(i, "color", e.detail.value ?? "");
                     if (errors.badVariants?.has(i) && e.detail.value?.trim()) {
@@ -455,9 +494,9 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
               </div>
               {isInvalid && (
                 <p style={{ ...errText, marginLeft: 2, marginBottom: 0 }}>
-                  {missSize && missColor ? "ຕ້ອງໃສ່ ໄຊສ໌ ແລະ ສີ"
-                    : missSize ? "ຕ້ອງໃສ່ ໄຊສ໌"
-                    : "ຕ້ອງໃສ່ ສີ"}
+                  {missSize && missColor ? "ຕ້ອງໃສ່ ຂະໜາດ ແລະ ຕົວເລືອກ"
+                    : missSize ? "ຕ້ອງໃສ່ ຂະໜາດ"
+                    : "ຕ້ອງໃສ່ ຕົວເລືອກ"}
                 </p>
               )}
             </div>
@@ -487,7 +526,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
     <IonAlert
       isOpen={newCatAlertOpen}
       header="ສ້າງໝວດໝູ່ໃໝ່"
-      inputs={[{ name: "name", type: "text", placeholder: "ເຊັ່ນ: ເສື້ອ, ກາງເກງ..." }]}
+      inputs={[{ name: "name", type: "text", placeholder: "ເຊັ່ນ: ອາຫານ, ເຄື່ອງດື່ມ, ຂອງຫວານ..." }]}
       buttons={[
         { text: "ຍົກເລີກ", role: "cancel", handler: () => setNewCatAlertOpen(false) },
         { text: "ສ້າງ", handler: (data) => { if (data.name?.trim()) handleCreateCategory(data.name); setNewCatAlertOpen(false); } },
@@ -509,7 +548,7 @@ const ProductForm: React.FC<Props> = ({ isOpen, product, categories, shopId, isO
     <IonAlert
       isOpen={!!deleteCatTarget}
       header="ລຶບໝວດໝູ່"
-      message={`ລຶບ "${deleteCatTarget?.name}" ແມ່ນບໍ? ສິນຄ້າໃນໝວດນີ້ຈະບໍ່ມີໝວດ`}
+      message={`ລຶບ "${deleteCatTarget?.name}" ແມ່ນບໍ? ເມນູໃນໝວດນີ້ຈະບໍ່ມີໝວດ`}
       buttons={[
         { text: "ຍົກເລີກ", role: "cancel", handler: () => setDeleteCatTarget(null) },
         { text: "ລຶບ", role: "destructive", handler: handleDeleteCategory },

@@ -214,7 +214,7 @@ const VariantPicker: React.FC<Props> = ({ product, isOpen, onAdd, onDismiss }) =
             style={{ minHeight: 52, "--border-radius": "14px" }}
           >
             {totalQty === 0
-              ? "ເລືອກສິນຄ້າກ່ອນ"
+              ? "ເລືອກເມນູກ່ອນ"
               : `ເພີ່ມໃສ່ກະຕ່າ (${totalQty} ລາຍການ)`}
           </IonButton>
         </div>

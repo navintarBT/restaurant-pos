@@ -112,7 +112,9 @@ const Summary: React.FC = () => {
         getReturnsByDateRange(shopId, from, to),
         getProducts(shopId),
       ]);
-      setTodaySales(s);
+      // Dine-in orders not yet billed (status !== "paid") aren't revenue yet —
+      // exclude them here so summaries never count an unpaid table's total.
+      setTodaySales(s.filter((sale) => sale.status === "paid"));
       setTodayExpenses(exps.filter((e) => isShopScopedExpenseCategory(e.category)).reduce((sum, e) => sum + e.amount, 0));
       setTodayReturns(rets);
       setProducts(prods);
@@ -131,7 +133,7 @@ const Summary: React.FC = () => {
         getExpensesByDateRange(shopId, from, to),
         getReturnsByDateRange(shopId, from, to),
       ]);
-      setMonthSales(s);
+      setMonthSales(s.filter((sale) => sale.status === "paid"));
       setMonthExpenses(exps.filter((e) => isShopScopedExpenseCategory(e.category)).reduce((sum, e) => sum + e.amount, 0));
       setMonthReturns(rets);
     } finally {
@@ -347,7 +349,7 @@ const Summary: React.FC = () => {
                   <div style={{ height: 1, background: "var(--app-surface-alt)", margin: "2px 0 8px" }} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--app-cost-surface)", borderRadius: 9, padding: "7px 10px" }}>
-                      <span style={{ fontSize: "0.73rem", fontWeight: 600, color: "var(--app-cost)" }}>🏷️ ຕົ້ນທຶນສິນຄ້າ</span>
+                      <span style={{ fontSize: "0.73rem", fontWeight: 600, color: "var(--app-cost)" }}>🏷️ ຕົ້ນທຶນເມນູ</span>
                       <span style={{ fontSize: "0.84rem", fontWeight: 800, color: "var(--app-cost)" }}>{fmtK(tCost)} ກີບ</span>
                     </div>
                     {tLoss > 0 ? (
@@ -396,7 +398,7 @@ const Summary: React.FC = () => {
             <>
               {!hasInvCost ? (
                 <p style={{ textAlign: "center", color: "var(--app-text-muted)", padding: "12px 0" }}>
-                  ຍັງບໍ່ມີຂໍ້ມູນສິນຄ້າ (ຍັງບໍ່ໄດ້ໃສ່ລາຄາຕົ້ນທຶນ)
+                  ຍັງບໍ່ມີຂໍ້ມູນເມນູ (ຍັງບໍ່ໄດ້ໃສ່ລາຄາຕົ້ນທຶນ)
                 </p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -472,7 +474,7 @@ const Summary: React.FC = () => {
                       border: "1.5px solid #fcd34d", boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
                     }}>
                       <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "0.8rem", color: "var(--app-cost)" }}>
-                        📦 ສິນຄ້າຕີກັບ ({monthReturns.length} ລາຍການ)
+                        📦 ເມນູຕີກັບ ({monthReturns.length} ລາຍການ)
                       </p>
                       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                         <Row label="💸 ຍອດຄືນລູກຄ້າ"  value={`−${fmtK(mRetRevenue)} ກີບ`} bg="var(--app-danger-surface)" color="var(--app-danger)" />

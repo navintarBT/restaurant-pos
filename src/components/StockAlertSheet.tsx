@@ -67,7 +67,7 @@ const StockAlertSheet: React.FC<Props> = ({ isOpen, products, onDismiss }) => {
                       <div style={{ fontSize: "0.82rem", color: "var(--app-text-secondary)", marginTop: 2 }}>
                         {v.size} / {v.color}
                       </div>
-                      <div style={{ fontSize: "0.78rem", color: "var(--app-danger)", marginTop: 2 }}>ສິນຄ້າໝົດ</div>
+                      <div style={{ fontSize: "0.78rem", color: "var(--app-danger)", marginTop: 2 }}>ເມນູໝົດ</div>
                     </IonLabel>
                   </IonItem>
                 ))}
