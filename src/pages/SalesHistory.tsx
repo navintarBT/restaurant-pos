@@ -33,7 +33,6 @@ function saleLineKey(item: Sale["items"][number]): string {
 const PAYMENT_BADGE: Record<PaymentType, { label: string; bg: string; color: string }> = {
   cash: { label: "💵 ສົດ", bg: "var(--app-success-surface)", color: "var(--app-success)" },
   qr: { label: "📱 ໂອນ", bg: "var(--app-info-surface)", color: "var(--app-info)" },
-  cod: { label: "📦 COD", bg: "var(--app-warning-surface)", color: "var(--app-warning)" },
 };
 
 interface StatCardProps {
@@ -181,7 +180,6 @@ const SalesHistory: React.FC = () => {
   const totalRevenue = paidSales.reduce((s, t) => s + t.total, 0);
   const cashTotal = paidSales.filter((s) => s.paymentType === "cash").reduce((s, t) => s + t.total, 0);
   const qrTotal = paidSales.filter((s) => s.paymentType === "qr").reduce((s, t) => s + t.total, 0);
-  const codTotal = paidSales.filter((s) => s.paymentType === "cod").reduce((s, t) => s + t.total, 0);
   const itemCount = paidSales.reduce((s, sale) => s + sale.items.reduce((is, i) => is + i.quantity, 0), 0);
   const totalDiscount = paidSales.reduce((s, sale) =>
     s + sale.items.reduce((is, item) => {
@@ -218,11 +216,11 @@ const SalesHistory: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar className="has-shop-tag">
-          <div slot="start"><ShopHeaderTag /></div>
-          <IonTitle style={{ fontWeight: 700 }}>ປະຫວັດການຂາຍ</IonTitle>
-          <IonButtons slot="end">
+          <IonButtons slot="start">
             <IonMenuButton autoHide={false} />
           </IonButtons>
+          <div slot="start"><ShopHeaderTag /></div>
+          <IonTitle style={{ fontWeight: 700 }}>ປະຫວັດການຂາຍ</IonTitle>
         </IonToolbar>
       </IonHeader>
 
@@ -420,13 +418,9 @@ const SalesHistory: React.FC = () => {
                     <StatCard label="ເງິນສົດ" value={`${fmtK(cashTotal)} ກີບ`}
                       icon="💵" bg="var(--app-success-surface)" color="var(--app-success)" />
                   </IonCol>
-                  <IonCol style={{ paddingRight: 4, paddingLeft: 4 }}>
+                  <IonCol style={{ paddingRight: 0, paddingLeft: 4 }}>
                     <StatCard label="ໂອນ" value={`${fmtK(qrTotal)} ກີບ`}
                       icon="📱" bg="var(--app-info-surface)" color="var(--app-info)" />
-                  </IonCol>
-                  <IonCol style={{ paddingRight: 0, paddingLeft: 4 }}>
-                    <StatCard label="COD" value={`${fmtK(codTotal)} ກີບ`}
-                      icon="📦" bg="var(--app-warning-surface)" color="var(--app-warning)" />
                   </IonCol>
                 </IonRow>
               </IonGrid>
@@ -571,6 +565,9 @@ const SalesHistory: React.FC = () => {
                           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
                             <span style={{ fontSize: "0.68rem", color: "var(--app-text-muted)" }}>{qty} ຊ
                             </span>
+                            {sale.tableLabel && (
+                              <span style={{ fontSize: "0.68rem", color: "var(--ion-color-primary)", fontWeight: 700 }}>· 🪑 ໂຕະ {sale.tableLabel}</span>
+                            )}
                             {sale.sellerName && (
                               <span style={{ fontSize: "0.68rem", color: "var(--app-text-muted)" }}>· 👤 {sale.sellerName}</span>
                             )}
@@ -667,12 +664,15 @@ const SalesHistory: React.FC = () => {
                 color: PAYMENT_BADGE[selectedSale.paymentType!].color,
                 borderRadius: 8, padding: "4px 12px", fontWeight: 700, fontSize: "0.85rem",
               }}>
-                {selectedSale.paymentType === "cash" ? "💵 ເງິນສົດ"
-                  : selectedSale.paymentType === "qr" ? "📱 ໂອນ"
-                  : "📦 COD"}
+                {selectedSale.paymentType === "cash" ? "💵 ເງິນສົດ" : "📱 ໂອນ"}
               </span>
             </div>
 
+            {selectedSale.tableLabel && (
+              <div style={{ marginBottom: 8, fontSize: "0.82rem", color: "var(--app-text-secondary)" }}>
+                🪑 ໂຕະ: <span style={{ fontWeight: 700, color: "var(--ion-color-primary)" }}>{selectedSale.tableLabel}</span>
+              </div>
+            )}
             {selectedSale.sellerName && (
               <div style={{ marginBottom: 16, fontSize: "0.82rem", color: "var(--app-text-secondary)" }}>
                 👤 ຜູ້ຂາຍ: <span style={{ fontWeight: 700, color: "var(--ion-text-color)" }}>{selectedSale.sellerName}</span>

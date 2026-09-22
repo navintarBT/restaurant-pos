@@ -17,7 +17,7 @@ import {
   IonModal,
   IonFooter,
 } from "@ionic/react";
-import { trashOutline, checkmarkCircleOutline } from "ionicons/icons";
+import { trashOutline, checkmarkCircleOutline, addOutline, receiptOutline, printOutline } from "ionicons/icons";
 import { auth } from "../firebase";
 import { fmtK } from "../utils/format";
 import { getProducts } from "../data/productRepository";
@@ -47,6 +47,11 @@ const PublicOrder: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Everything this customer has submitted this visit — tracked client-side
+  // (not re-read from Firestore) so the bill view works without opening up
+  // sales reads to anonymous sessions. Resets if they reload the page.
+  const [orderedRounds, setOrderedRounds] = useState<{ items: SaleItem[]; total: number; at: Date }[]>([]);
+  const [billOpen, setBillOpen] = useState(false);
 
   const init = useCallback(async () => {
     if (!shopId || !code) return;
@@ -120,12 +125,29 @@ const PublicOrder: React.FC = () => {
   const cartTotal = cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
 
+  // Every round merged into one itemized bill (same product+variant across
+  // rounds is summed into a single line) — this is what the customer sees
+  // and can print, not the raw round-by-round submission history.
+  const billItems = (() => {
+    const map = new Map<string, SaleItem>();
+    for (const round of orderedRounds) {
+      for (const item of round.items) {
+        const key = itemKey(item);
+        const existing = map.get(key);
+        map.set(key, existing ? { ...existing, quantity: existing.quantity + item.quantity } : { ...item });
+      }
+    }
+    return [...map.values()];
+  })();
+  const billTotal = orderedRounds.reduce((s, r) => s + r.total, 0);
+
   async function handleSubmit() {
     if (!shopId || !session || !auth.currentUser || cart.length === 0) return;
     setSending(true);
     setError(null);
     try {
       await createOrder(shopId, cart, session.id, session.tableLabel, auth.currentUser.uid, "ລູກຄ້າ");
+      setOrderedRounds((prev) => [...prev, { items: cart, total: cartTotal, at: new Date() }]);
       setCart([]);
       setCartOpen(false);
       setSent(true);
@@ -173,6 +195,13 @@ const PublicOrder: React.FC = () => {
           <IonTitle>
             {shop?.name ?? "ເມນູ"} · ໂຕະ {session?.tableLabel}
           </IonTitle>
+          {orderedRounds.length > 0 && (
+            <IonButtons slot="end">
+              <IonButton onClick={() => setBillOpen(true)}>
+                <IonIcon slot="icon-only" icon={receiptOutline} />
+              </IonButton>
+            </IonButtons>
+          )}
         </IonToolbar>
       </IonHeader>
 
@@ -305,12 +334,20 @@ const PublicOrder: React.FC = () => {
                       {item.variant.size}{item.variant.color ? ` / ${item.variant.color}` : ""} — {fmtK(item.unitPrice * item.quantity)} ກີບ
                     </p>
                   </div>
-                  <button onClick={() => removeCartItem(key)} style={{ background: "none", border: "none", color: "var(--app-danger)", cursor: "pointer", padding: 6 }}>
+                  <button onClick={() => removeCartItem(key)} style={{ background: "none", border: "none", color: "var(--app-danger)", cursor: "pointer", minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <IonIcon icon={trashOutline} />
                   </button>
                 </div>
               );
             })}
+
+            <IonButton
+              fill="outline" expand="block" onClick={() => setCartOpen(false)}
+              style={{ "--border-radius": "10px", marginTop: 14 }}
+            >
+              <IonIcon slot="start" icon={addOutline} />
+              ເພີ່ມອີກ
+            </IonButton>
 
             {error && <p style={{ color: "var(--app-danger)", fontSize: "0.85rem", marginTop: 12 }}>{error}</p>}
           </div>
@@ -334,6 +371,65 @@ const PublicOrder: React.FC = () => {
             </IonButton>
           </div>
         </IonFooter>
+      </IonModal>
+
+      {/* Bill summary — everything ordered this visit, mergeable across rounds, printable */}
+      <IonModal isOpen={billOpen} onDidDismiss={() => setBillOpen(false)} initialBreakpoint={0.8} breakpoints={[0, 0.8, 1]}>
+        <style>{`
+          @media print {
+            body * { visibility: hidden; }
+            #public-bill-print, #public-bill-print * { visibility: visible; }
+            #public-bill-print { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
+          }
+        `}</style>
+        <IonHeader className="ion-no-print">
+          <IonToolbar>
+            <IonTitle style={{ fontSize: "1rem" }}>ບິນ</IonTitle>
+            <IonButtons slot="end">
+              <IonButton onClick={() => setBillOpen(false)}>ປິດ</IonButton>
+            </IonButtons>
+          </IonToolbar>
+        </IonHeader>
+        <IonContent>
+          <div id="public-bill-print" style={{ padding: "16px 20px 32px" }}>
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <p style={{ margin: 0, fontWeight: 800, fontSize: "1.1rem", color: "var(--ion-text-color)" }}>{shop?.name ?? ""}</p>
+              <p style={{ margin: "2px 0 0", fontSize: "0.85rem", color: "var(--app-text-secondary)" }}>ໂຕະ {session?.tableLabel}</p>
+              <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "var(--app-text-muted)" }}>
+                {orderedRounds[0]?.at.toLocaleString("lo-LA")}
+              </p>
+            </div>
+
+            <div style={{ borderTop: "1px dashed var(--app-border)", borderBottom: "1px dashed var(--app-border)", padding: "10px 0" }}>
+              {billItems.map((item, idx) => (
+                <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", padding: "5px 0" }}>
+                  <span style={{ color: "var(--ion-text-color)" }}>
+                    {item.productName}
+                    {item.variant.size && item.variant.color !== "__bundle__" ? ` (${item.variant.size}${item.variant.color ? `/${item.variant.color}` : ""})` : ""}
+                    {" "}×{item.quantity}
+                  </span>
+                  <span style={{ fontWeight: 600 }}>{fmtK(item.unitPrice * item.quantity)} ກີບ</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+              <span style={{ fontWeight: 700, fontSize: "1rem" }}>ລວມທັງໝົດ</span>
+              <span style={{ fontWeight: 800, fontSize: "1.3rem", color: "var(--ion-color-primary)" }}>{fmtK(billTotal)} ກີບ</span>
+            </div>
+            <p style={{ marginTop: 8, fontSize: "0.72rem", color: "var(--app-text-muted)", textAlign: "center" }}>
+              * ຍັງບໍ່ໄດ້ຊຳລະ — ພະນັກງານຈະເປັນຄົນປິດບິນ
+            </p>
+
+            <IonButton
+              className="ion-no-print" expand="block" fill="outline" onClick={() => window.print()}
+              style={{ "--border-radius": "10px", marginTop: 20 }}
+            >
+              <IonIcon slot="start" icon={printOutline} />
+              ພິມບິນ
+            </IonButton>
+          </div>
+        </IonContent>
       </IonModal>
     </IonPage>
   );

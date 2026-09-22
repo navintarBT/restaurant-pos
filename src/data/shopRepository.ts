@@ -41,6 +41,92 @@ export async function updateShopProfile(
   });
 }
 
+export interface TableRosterEntry {
+  label: string;
+  zone?: string;
+  seats?: number;
+  // Whether THIS table charges the shop's service-charge % (see
+  // getServiceChargeSettings) when its bill is closed. Master on/off for the
+  // whole shop still lives in ServiceChargeSettings.enabled.
+  serviceCharge?: boolean;
+  // How many physical tables are pushed together to form this one roster
+  // entry (e.g. tables 5+6 joined for a big group become one "5" entry with
+  // physicalTables: 2). Informational only — undefined/1 means a single table.
+  physicalTables?: number;
+}
+
+/** A table's short `label` is only unique WITHIN its zone (see TableForm.tsx's
+ * duplicate check) — two zones can both have a "5". Everywhere a table needs
+ * a single real-world identity (opening/reusing a TableSession, the QR link,
+ * what prints on a kitchen ticket or bill), use this combined string instead
+ * of the bare label, so "5" in two different zones can never collide into
+ * the same session. */
+export function tableDisplayLabel(label: string, zone?: string): string {
+  return zone ? `${zone} ${label}` : label;
+}
+
+/** Identifies a roster entry by (zone, label) as one opaque route/URL
+ * segment — used by TableForm.tsx's edit route and ManageTables.tsx's edit
+ * links, since the bare label alone no longer uniquely identifies an entry. */
+export function encodeEntryKey(zone: string | undefined, label: string): string {
+  return encodeURIComponent(`${zone ?? ""}\u0000${label}`);
+}
+export function decodeEntryKey(key: string): { zone?: string; label: string } {
+  const [zonePart, label] = decodeURIComponent(key).split("\u0000");
+  return { zone: zonePart || undefined, label };
+}
+
+/** The shop's predefined tables (e.g. [{label:"1",zone:"ໃນຮ້ານ"}, ...]) — lets
+ * "ເລືອກໂຕະ" show every table as a tile up front instead of staff typing a
+ * label from scratch each time a customer sits down. */
+export async function getTableRoster(shopId: string): Promise<TableRosterEntry[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  const raw = snap.data()?.tableRoster as unknown[] | undefined;
+  if (!raw) return [];
+  // Back-compat: the first version of this field stored plain string labels.
+  return raw.map((entry) => (typeof entry === "string" ? { label: entry } : (entry as TableRosterEntry)));
+}
+
+export async function setTableRoster(shopId: string, tables: TableRosterEntry[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    tableRoster: tables,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Named areas (e.g. ["ໃນຮ້ານ","ນອກຮ້ານ","VIP"]) used to group/filter tables. */
+export async function getTableZones(shopId: string): Promise<string[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.tableZones as string[] | undefined) ?? [];
+}
+
+export async function setTableZones(shopId: string, zones: string[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    tableZones: zones,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export interface ServiceChargeSettings {
+  enabled: boolean;
+  percent: number;
+}
+
+/** Shop-wide service-charge master switch + percentage. Which tables actually
+ * charge it is per-table (TableRosterEntry.serviceCharge). */
+export async function getServiceChargeSettings(shopId: string): Promise<ServiceChargeSettings> {
+  const snap = await getDoc(shopDoc(shopId));
+  const sc = snap.data()?.serviceCharge as Partial<ServiceChargeSettings> | undefined;
+  return { enabled: sc?.enabled ?? false, percent: sc?.percent ?? 0 };
+}
+
+export async function setServiceChargeSettings(shopId: string, settings: ServiceChargeSettings): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    serviceCharge: settings,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function getShopUsers(shopId: string): Promise<ShopUser[]> {
   const snap = await getDocs(shopUsersCol(shopId));
   return snap.docs.map((d) => {

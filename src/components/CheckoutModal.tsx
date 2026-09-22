@@ -36,11 +36,7 @@ const CheckoutModal: React.FC<Props> = ({ isOpen, onDismiss, onSuccess }) => {
     setBusy(true);
     try {
       await recordSale(shopId, items, total, paymentType, user.uid, displayName);
-      setSuccessMsg(
-        paymentType === "cod"
-          ? `ບັນທຶກອອເດີ COD ແລ້ວ ${fmtK(total)} ກີບ — ລໍຖ້າເກັບເງິນ`
-          : `ຮັບເງິນສຳເລັດ ${fmtK(total)} ກີບ`
-      );
+      setSuccessMsg(`ຮັບເງິນສຳເລັດ ${fmtK(total)} ກີບ`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "ເກີດຂໍ້ຜິດພາດ";
       setError(msg === "Insufficient stock" ? "ເມນູບໍ່ພໍຂາຍ ກະລຸນາກວດສອບສະຕ໋ອກ" : msg);
@@ -82,7 +78,7 @@ const CheckoutModal: React.FC<Props> = ({ isOpen, onDismiss, onSuccess }) => {
             </IonText>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <IonButton
               expand="block"
               color="success"
@@ -100,15 +96,6 @@ const CheckoutModal: React.FC<Props> = ({ isOpen, onDismiss, onSuccess }) => {
               style={{ minHeight: 72, fontSize: "0.92rem" }}
             >
               {busy ? (<IonSpinner name="dots" style={{ width: 20, height: 20 }} />) : "📱 ໂອນ"}
-            </IonButton>
-            <IonButton
-              expand="block"
-              color="warning"
-              disabled={busy}
-              onClick={() => handlePay("cod")}
-              style={{ minHeight: 72, fontSize: "0.92rem" }}
-            >
-              {busy ? (<IonSpinner name="dots" style={{ width: 20, height: 20 }} />) : "📦 COD"}
             </IonButton>
           </div>
         </IonContent>

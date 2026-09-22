@@ -202,7 +202,6 @@ const Login: React.FC = () => {
                 </IonButton>
               </div>
             )}
-
           </div>
         </div>
       </IonContent>

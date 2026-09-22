@@ -14,7 +14,7 @@ export interface ReturnRecord {
   quantity: number;
   costPrice: number;
   sellingPrice: number;
-  paymentType?: "cash" | "transfer" | "cod";
+  paymentType?: "cash" | "transfer";
   createdAt: Date;
 }
 
@@ -116,7 +116,7 @@ export interface ShopUser {
   permissions?: StaffPermissions;
 }
 
-export type PaymentType = "cash" | "qr" | "cod";
+export type PaymentType = "cash" | "qr";
 
 // Was a fixed 3-value union; widened to allow custom categories (see
 // src/data/expenseCategoryRepository.ts). "shop"/"capital"/"general" are
@@ -138,7 +138,7 @@ export interface Income {
   id: string;
   description: string;
   amount: number;
-  paymentType: "cash" | "transfer" | "cod";
+  paymentType: "cash" | "transfer";
   createdAt: Date;
 }
 

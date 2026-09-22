@@ -22,12 +22,11 @@ interface ShopRef { id: string; name: string; profileUrl?: string }
 interface TaggedExpense extends Expense { shopId: string; shopName: string }
 interface TaggedIncome extends Income { shopId: string; shopName: string }
 
-type PaymentKind = "cash" | "transfer" | "cod";
+type PaymentKind = "cash" | "transfer";
 
 const PAYMENT_TOGGLE_STYLE: Record<PaymentKind, { label: string; color: string }> = {
   cash: { label: "💵 ເງິນສົດ", color: "var(--app-success)" },
   transfer: { label: "📱 ໂອນ", color: "var(--app-info)" },
-  cod: { label: "📦 COD", color: "var(--app-warning)" },
 };
 
 const EXPENSE_CATEGORY_STYLE: Record<ExpenseCategory, { label: string; chipLabel: string; color: string }> = {
@@ -62,7 +61,7 @@ function PaymentToggle<T extends PaymentKind>({ value, onChange, options }: {
 }
 
 const EXPENSE_PAYMENT_OPTIONS = ["cash", "transfer"] as const;
-const INCOME_PAYMENT_OPTIONS = ["cash", "transfer", "cod"] as const;
+const INCOME_PAYMENT_OPTIONS = ["cash", "transfer"] as const;
 
 interface Props {
   shops: ShopRef[];
@@ -301,7 +300,6 @@ export default function CombinedLedger({ shops, onBack }: Props) {
   const scopedShopIds = shopFilter === "all" ? shops.map((s) => s.id) : [shopFilter];
   const cashBalance = scopedShopIds.reduce((s, id) => s + (walletByShop[id]?.cashBalance ?? 0), 0);
   const transferBalance = scopedShopIds.reduce((s, id) => s + (walletByShop[id]?.transferBalance ?? 0), 0);
-  const codOutstanding = scopedShopIds.reduce((s, id) => s + (walletByShop[id]?.codOutstanding ?? 0), 0);
 
   // Matches the category chip (ທັງໝົດ/ຮ້ານ/ທຶນ/ສ່ວນຕົວ) so the summary card
   // total always reflects whichever filter is selected, instead of always
@@ -315,7 +313,6 @@ export default function CombinedLedger({ shops, onBack }: Props) {
   const incTotal = scopedIncomes.reduce((s, i) => s + i.amount, 0);
   const incCash = scopedIncomes.filter((i) => i.paymentType === "cash").reduce((s, i) => s + i.amount, 0);
   const incTransfer = scopedIncomes.filter((i) => i.paymentType === "transfer").reduce((s, i) => s + i.amount, 0);
-  const incCod = scopedIncomes.filter((i) => i.paymentType === "cod").reduce((s, i) => s + i.amount, 0);
 
   const isExpTab = activeTab === "expense";
   const loading = isExpTab ? expLoading : incLoading;
@@ -339,7 +336,7 @@ export default function CombinedLedger({ shops, onBack }: Props) {
         </IonRefresher>
 
         <div style={{ margin: "12px 16px 0" }}>
-          <WalletCard loading={walletLoading} cashBalance={cashBalance} transferBalance={transferBalance} codOutstanding={codOutstanding} />
+          <WalletCard loading={walletLoading} cashBalance={cashBalance} transferBalance={transferBalance} />
         </div>
 
         <div style={{ display: "flex", gap: 0, margin: "12px 16px 0", borderRadius: 12, background: "var(--ion-color-step-50, var(--app-surface-alt))", padding: 4 }}>
@@ -393,7 +390,6 @@ export default function CombinedLedger({ shops, onBack }: Props) {
                 { label: "ທັງໝົດ", value: isExpTab ? expTotal : incTotal },
                 { label: "💵 ເງິນສົດ", value: isExpTab ? expCash : incCash },
                 { label: "📱 ໂອນ", value: isExpTab ? expTransfer : incTransfer },
-                ...(isExpTab ? [] : [{ label: "📦 COD", value: incCod }]),
               ].map(({ label, value }) => (
                 <div key={label} style={{ textAlign: "center" }}>
                   <p style={{ margin: 0, fontSize: "0.72rem", color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>{label}</p>

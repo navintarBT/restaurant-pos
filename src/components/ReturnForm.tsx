@@ -127,7 +127,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
   const [rStep, setRStep] = useState<"product" | "detail">("product");
   const [rProduct, setRProduct] = useState<Product | null>(null);
   const [rQtys, setRQtys] = useState<Record<number, number>>({});
-  const [rPayment, setRPayment] = useState<"cash" | "transfer" | "cod">("cash");
+  const [rPayment, setRPayment] = useState<"cash" | "transfer">("cash");
   const [rSaving, setRSaving] = useState(false);
   const [rError, setRError] = useState(false);
   const [rHistoryOpen, setRHistoryOpen] = useState(false);
@@ -387,7 +387,6 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
                         [
                           { v: "cash" as const, label: "💵 ສົດ", color: "var(--app-success)" },
                           { v: "transfer" as const, label: "📱 ໂອນ", color: "var(--app-info)" },
-                          { v: "cod" as const, label: "📦 COD", color: "var(--app-warning)" },
                         ] as const
                       ).map(({ v, label, color }) => (
                         <button

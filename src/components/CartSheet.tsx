@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   IonModal,
   IonHeader,
@@ -40,6 +40,18 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
   const [editPrice, setEditPrice] = useState(0);
   const [fromSubRow, setFromSubRow] = useState(false);
   const [pendingPrice, setPendingPrice] = useState<{ key: string; price: number; split: boolean } | null>(null);
+
+  // Removing the last item empties the cart while the sheet is still open —
+  // rather than show a "ກະຕ່າຫວ່າງເປົ່າ" screen the seller has to close by
+  // hand, just close it for them. Only fires on a >0 -> 0 transition, not on
+  // opening an already-empty cart.
+  const prevItemsLen = useRef(items.length);
+  useEffect(() => {
+    if (isOpen && prevItemsLen.current > 0 && items.length === 0) {
+      onDismiss();
+    }
+    prevItemsLen.current = items.length;
+  }, [items.length, isOpen, onDismiss]);
 
   const [giftPickerOpen, setGiftPickerOpen] = useState(false);
   const [giftCategory, setGiftCategory] = useState("all");
@@ -439,9 +451,18 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
                   {fmtK(total)} ກີບ
                 </span>
               </div>
-              <IonButton expand="block" onClick={onCheckout} style={{ minHeight: 54, "--border-radius": "14px" }}>
-                ຊຳລະເງິນ
-              </IonButton>
+              <div style={{ display: "flex", gap: 8 }}>
+                <IonButton expand="block" onClick={onCheckout} style={{ flex: 1, minHeight: 54, "--border-radius": "14px", margin: 0 }}>
+                  ຊຳລະເງິນ
+                </IonButton>
+                <IonButton
+                  fill="outline" onClick={onDismiss}
+                  style={{ flexShrink: 0, minHeight: 54, "--border-radius": "14px", margin: 0, "--padding-start": "12px", "--padding-end": "14px" }}
+                >
+                  <IonIcon slot="start" icon={addOutline} />
+                  ເພີ່ມອີກ
+                </IonButton>
+              </div>
             </div>
           </IonFooter>
         )}

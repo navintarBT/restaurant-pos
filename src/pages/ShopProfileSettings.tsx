@@ -15,13 +15,13 @@ import {
   IonToolbar,
   useIonViewWillEnter,
 } from "@ionic/react";
-import { alertCircleOutline, businessOutline, checkmarkCircleOutline, closeOutline, createOutline, mailOutline, ribbonOutline, saveOutline } from "ionicons/icons";
+import { alertCircleOutline, businessOutline, checkmarkCircleOutline, closeOutline, createOutline, mailOutline, receiptOutline, ribbonOutline, saveOutline } from "ionicons/icons";
 import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import ImagePicker from "../components/ImagePicker";
 import { useAuth } from "../context/AuthContext";
 import { auth } from "../firebase";
 import { uploadProductImage } from "../data/imageRepository";
-import { getShopProfile, updateShopProfile, updateOwnerEmail } from "../data/shopRepository";
+import { getShopProfile, updateShopProfile, updateOwnerEmail, getServiceChargeSettings, setServiceChargeSettings } from "../data/shopRepository";
 import type { ShopProfile } from "../data/types";
 
 const STATUS_LABELS: Record<string, { label: string; color: string; bg: string }> = {
@@ -100,6 +100,12 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailMessage, setEmailMessage] = useState<string | null>(null);
 
+  const [scEnabled, setScEnabled] = useState(false);
+  const [scPercent, setScPercent] = useState("0");
+  const [scSaving, setScSaving] = useState(false);
+  const [scMessage, setScMessage] = useState<string | null>(null);
+  const [scMessageError, setScMessageError] = useState(false);
+
   const isOwner = role === "customer";
 
   useEffect(() => {
@@ -108,23 +114,48 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
     return () => clearTimeout(t);
   }, [message]);
 
+  useEffect(() => {
+    if (!scMessage) return;
+    const t = setTimeout(() => setScMessage(null), 3000);
+    return () => clearTimeout(t);
+  }, [scMessage]);
+
   const load = useCallback(async () => {
     if (!shopId) return;
     setLoading(true);
     setError(null);
     try {
-      const profile = await getShopProfile(shopId);
+      const [profile, sc] = await Promise.all([getShopProfile(shopId), getServiceChargeSettings(shopId)]);
       setShop(profile);
       setName(profile.name);
       setProfileUrl(profile.profileUrl ?? "");
       setPendingImage(null);
       setIsEditing(false);
+      setScEnabled(sc.enabled);
+      setScPercent(String(sc.percent));
     } catch (err) {
       setError(err instanceof Error ? err.message : "ບໍ່ສາມາດໂຫຼດໂປຣໄຟລ໌ຮ້ານໄດ້");
     } finally {
       setLoading(false);
     }
   }, [shopId]);
+
+  async function handleSaveServiceCharge() {
+    if (!shopId) return;
+    setScSaving(true);
+    setScMessage(null);
+    try {
+      const percent = Math.max(0, parseFloat(scPercent) || 0);
+      await setServiceChargeSettings(shopId, { enabled: scEnabled, percent });
+      setScMessageError(false);
+      setScMessage("ບັນທຶກຄ່າບໍລິການແລ້ວ");
+    } catch {
+      setScMessageError(true);
+      setScMessage("ບັນທຶກບໍ່ສຳເລັດ, ລອງໃໝ່");
+    } finally {
+      setScSaving(false);
+    }
+  }
 
   useIonViewWillEnter(() => { load(); }, [load]);
 
@@ -231,10 +262,10 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle style={{ fontWeight: 700 }}>ໂປຣໄຟລ໌ຮ້ານ</IonTitle>
-          <IonButtons slot="end">
+          <IonButtons slot="start">
             <IonMenuButton autoHide={false} />
           </IonButtons>
+          <IonTitle style={{ fontWeight: 700 }}>ໂປຣໄຟລ໌ຮ້ານ</IonTitle>
         </IonToolbar>
       </IonHeader>
 
@@ -327,6 +358,59 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
                   </div>
                 </div>
               </div>
+
+              {/* Service charge */}
+              <section style={cardStyle}>
+                <SectionHeading icon={receiptOutline} label="ຄ່າບໍລິການ" />
+                <p style={{ margin: "8px 0 12px", fontSize: "0.8rem", color: "var(--app-text-secondary)", marginLeft: 34 }}>
+                  ເປີດໃຊ້ ແລ້ວຕັ້ງເປີເຊັນ, ຈາກນັ້ນເລືອກວ່າໂຕະໃດຄິດຄ່າບໍລິການຢູ່ໜ້າ "ຈັດການໂຕະ"
+                </p>
+                <div
+                  onClick={() => setScEnabled((v) => !v)}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer",
+                    padding: "10px 12px", borderRadius: 10,
+                    background: scEnabled ? "var(--app-accent-surface)" : "var(--ion-color-step-50, #f5f5f4)",
+                  }}
+                >
+                  <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--ion-text-color)" }}>
+                    {scEnabled ? `ໃຊ້ງານ / ${scPercent}%` : "ປິດໃຊ້ງານ"}
+                  </span>
+                  <div style={{
+                    width: 46, height: 26, borderRadius: 13, flexShrink: 0,
+                    background: scEnabled ? "var(--ion-color-primary)" : "var(--ion-color-step-200, #d4d4d0)",
+                    position: "relative", transition: "background 0.15s",
+                  }}>
+                    <div style={{
+                      position: "absolute", top: 2, left: scEnabled ? 22 : 2,
+                      width: 22, height: 22, borderRadius: "50%", background: "var(--app-surface)",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.3)", transition: "left 0.15s",
+                    }} />
+                  </div>
+                </div>
+                {scEnabled && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+                    <IonInput
+                      type="number" min="0" max="100" value={scPercent}
+                      onIonInput={(e) => setScPercent(e.detail.value ?? "0")}
+                      fill="outline" style={{ "--border-radius": "12px", flex: 1 }}
+                    />
+                    <span style={{ fontWeight: 700, color: "var(--app-text-secondary)" }}>%</span>
+                  </div>
+                )}
+                {scMessage && (
+                  <div style={{ marginTop: 10, fontWeight: 700, fontSize: "0.82rem", color: scMessageError ? "var(--app-danger)" : "var(--app-success)" }}>
+                    {scMessage}
+                  </div>
+                )}
+                <IonButton
+                  expand="block" size="small" disabled={scSaving}
+                  onClick={handleSaveServiceCharge}
+                  style={{ marginTop: 12, "--border-radius": "10px" }}
+                >
+                  {scSaving ? <IonSpinner name="dots" style={{ width: 18, height: 18 }} /> : "ບັນທຶກຄ່າບໍລິການ"}
+                </IonButton>
+              </section>
 
               {tenant && (
                 <div style={{ ...cardStyle, padding: "14px 16px" }}>

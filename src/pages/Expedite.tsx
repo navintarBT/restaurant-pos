@@ -62,11 +62,11 @@ const Expedite: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar className="has-shop-tag">
-          <div slot="start"><ShopHeaderTag /></div>
-          <IonTitle>ຈັດເສີບ</IonTitle>
-          <IonButtons slot="end">
+          <IonButtons slot="start">
             <IonMenuButton autoHide={false} />
           </IonButtons>
+          <div slot="start"><ShopHeaderTag /></div>
+          <IonTitle>ຈັດເສີບ</IonTitle>
         </IonToolbar>
       </IonHeader>
 

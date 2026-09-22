@@ -278,17 +278,25 @@ export async function advanceOrderStatus(
 /**
  * Server/owner closes a table's bill: every ticket the table accumulated
  * (possibly several rounds — see getOrdersBySession) is marked paid together
- * in one batch, all under the same payment type.
+ * in one batch, all under the same payment type. `serviceCharge`, when given,
+ * folds a "ຄ່າບໍລິການ" line item into ONE of those tickets (its full
+ * already-merged `items`/`total`, computed by the caller) so every existing
+ * revenue report — which just sums Sale.total / iterates Sale.items — picks
+ * it up automatically, with no separate service-charge plumbing needed.
  */
 export async function closeBill(
   shopId: string,
   saleIds: string[],
-  paymentType: PaymentType
+  paymentType: PaymentType,
+  serviceCharge?: { saleId: string; items: SaleItem[]; total: number }
 ): Promise<void> {
   const batch = writeBatch(db);
   const paidAt = Timestamp.now();
   for (const saleId of saleIds) {
-    batch.update(doc(salesCol(shopId), saleId), { paymentType, status: "paid", paidAt });
+    const extra = serviceCharge && serviceCharge.saleId === saleId
+      ? { items: serviceCharge.items, total: serviceCharge.total }
+      : {};
+    batch.update(doc(salesCol(shopId), saleId), { paymentType, status: "paid", paidAt, ...extra });
   }
   await batch.commit();
 }
@@ -337,18 +345,6 @@ export async function getSalesByDateRange(shopId: string, from: Date, to: Date):
   });
 }
 
-export async function getCodSales(shopId: string): Promise<Sale[]> {
-  const q = query(salesCol(shopId), where("paymentType", "==", "cod"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => {
-    const data = d.data();
-    return {
-      id: d.id,
-      ...data,
-      createdAt: (data.createdAt as Timestamp).toDate(),
-    } as Sale;
-  });
-}
 
 /**
  * Deletes a sale record. By default also restores the stock it had decremented

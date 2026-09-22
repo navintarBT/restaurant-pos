@@ -130,6 +130,9 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
     <IonPage>
       <IonHeader>
         <IonToolbar className="has-shop-tag">
+          <IonButtons slot="start">
+            <IonMenuButton autoHide={false} />
+          </IonButtons>
           <div slot="start"><ShopHeaderTag /></div>
           <IonTitle>ເມນູ</IonTitle>
           <IonButtons slot="end">
@@ -152,8 +155,6 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
                 </IonBadge>
               )}
             </IonButton>
-
-            <IonMenuButton autoHide={false} />
           </IonButtons>
         </IonToolbar>
       </IonHeader>

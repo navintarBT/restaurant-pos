@@ -21,12 +21,11 @@ import DateRangeFilter, { todayStr, monthStartStr } from "../components/DateRang
 import EmptyState from "../components/EmptyState";
 import ExpenseCategoryPicker from "../components/ExpenseCategoryPicker";
 
-type PaymentKind = "cash" | "transfer" | "cod";
+type PaymentKind = "cash" | "transfer";
 
 const PAYMENT_TOGGLE_STYLE: Record<PaymentKind, { label: string; color: string }> = {
   cash: { label: "💵 ເງິນສົດ", color: "var(--app-success)" },
   transfer: { label: "📱 ໂອນ", color: "var(--app-info)" },
-  cod: { label: "📦 COD", color: "var(--app-warning)" },
 };
 
 const EXPENSE_CATEGORY_STYLE: Record<ExpenseCategory, { label: string; chipLabel: string; color: string }> = {
@@ -77,7 +76,7 @@ function PaymentToggle<T extends PaymentKind>({
 }
 
 const EXPENSE_PAYMENT_OPTIONS = ["cash", "transfer"] as const;
-const INCOME_PAYMENT_OPTIONS = ["cash", "transfer", "cod"] as const;
+const INCOME_PAYMENT_OPTIONS = ["cash", "transfer"] as const;
 
 const Finance: React.FC = () => {
   const { shopId, role, permissions, features, user, displayName } = useAuth();
@@ -122,7 +121,6 @@ const Finance: React.FC = () => {
   const [walletLoading, setWalletLoading] = useState(true);
   const [cashBalance, setCashBalance] = useState(0);
   const [transferBalance, setTransferBalance] = useState(0);
-  const [codOutstanding, setCodOutstanding] = useState(0);
 
   const loadWallet = useCallback(async () => {
     if (!shopId) return;
@@ -131,7 +129,6 @@ const Finance: React.FC = () => {
       const balances = await getWalletBalances(shopId);
       setCashBalance(balances.cashBalance);
       setTransferBalance(balances.transferBalance);
-      setCodOutstanding(balances.codOutstanding);
     } finally {
       setWalletLoading(false);
     }
@@ -344,9 +341,6 @@ const Finance: React.FC = () => {
   const incTransfer = incomes
     .filter((i) => i.paymentType === "transfer")
     .reduce((s, i) => s + i.amount, 0);
-  const incCod = incomes
-    .filter((i) => i.paymentType === "cod")
-    .reduce((s, i) => s + i.amount, 0);
 
   const isExpTab = section === "shopExpense" ? true : activeTab === "expense";
   const loading = isExpTab ? expLoading : incLoading;
@@ -357,9 +351,15 @@ const Finance: React.FC = () => {
       <IonHeader>
         <IonToolbar className={section === "menu" ? "has-shop-tag" : undefined}>
           {section === "menu" ? (
-            <div slot="start"><ShopHeaderTag /></div>
+            <>
+              <IonButtons slot="start">
+                <IonMenuButton autoHide={false} />
+              </IonButtons>
+              <div slot="start"><ShopHeaderTag /></div>
+            </>
           ) : (
             <IonButtons slot="start">
+              <IonMenuButton autoHide={false} />
               <IonButton onClick={() => setSection("menu")}>
                 <IonIcon slot="icon-only" icon={chevronBackOutline} />
               </IonButton>
@@ -372,9 +372,6 @@ const Finance: React.FC = () => {
                 ? "ລາຍຈ່າຍຮ້ານ"
                 : "ບັນຊີລາຍຮັບລາຍຈ່າຍ"}
           </IonTitle>
-          <IonButtons slot="end">
-            <IonMenuButton autoHide={false} />
-          </IonButtons>
         </IonToolbar>
       </IonHeader>
 
@@ -448,7 +445,6 @@ const Finance: React.FC = () => {
             loading={walletLoading}
             cashBalance={cashBalance}
             transferBalance={transferBalance}
-            codOutstanding={codOutstanding}
           />
         </div>
         )}
@@ -514,7 +510,6 @@ const Finance: React.FC = () => {
                 { label: "ທັງໝົດ", value: isExpTab ? expTotal : incTotal },
                 { label: "💵 ເງິນສົດ", value: isExpTab ? expCash : incCash },
                 { label: "📱 ໂອນ", value: isExpTab ? expTransfer : incTransfer },
-                ...(isExpTab ? [] : [{ label: "📦 COD", value: incCod }]),
               ].map(({ label, value }) => (
                 <div key={label} style={{ textAlign: "center" }}>
                   <p

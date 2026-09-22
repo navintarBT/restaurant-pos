@@ -62,7 +62,6 @@ const Summary: React.FC = () => {
   const [walletLoading, setWalletLoading] = useState(true);
   const [cashBalance, setCashBalance] = useState(0);
   const [transferBalance, setTransferBalance] = useState(0);
-  const [codOutstanding, setCodOutstanding] = useState(0);
 
   const loadWallet = useCallback(async () => {
     if (!shopId) return;
@@ -71,7 +70,6 @@ const Summary: React.FC = () => {
       const balances = await getWalletBalances(shopId);
       setCashBalance(balances.cashBalance);
       setTransferBalance(balances.transferBalance);
-      setCodOutstanding(balances.codOutstanding);
     } finally {
       setWalletLoading(false);
     }
@@ -167,7 +165,6 @@ const Summary: React.FC = () => {
   const tRevenue    = todaySales.reduce((s, t) => s + t.total, 0);
   const tCash       = todaySales.filter(s => s.paymentType === "cash").reduce((s, t) => s + t.total, 0);
   const tQR         = todaySales.filter(s => s.paymentType === "qr").reduce((s, t) => s + t.total, 0);
-  const tCod        = todaySales.filter(s => s.paymentType === "cod").reduce((s, t) => s + t.total, 0);
   const tDiscount   = todaySales.reduce((s, sale) =>
     s + sale.items.reduce((is, item) => {
       if (item.isGift) return is;
@@ -231,7 +228,6 @@ const Summary: React.FC = () => {
   const finIncomeTotal    = finIncomes.reduce((s, i) => s + i.amount, 0);
   const finIncomeCash     = finIncomes.filter(i => i.paymentType === "cash").reduce((s, i) => s + i.amount, 0);
   const finIncomeTransfer = finIncomes.filter(i => i.paymentType === "transfer").reduce((s, i) => s + i.amount, 0);
-  const finIncomeCod      = finIncomes.filter(i => i.paymentType === "cod").reduce((s, i) => s + i.amount, 0);
 
   const finExpenseTotal    = finExpenses.reduce((s, e) => s + e.amount, 0);
   const finExpenseShop     = finExpenses.filter(e => isShopScopedExpenseCategory(e.category)).reduce((s, e) => s + e.amount, 0);
@@ -318,7 +314,7 @@ const Summary: React.FC = () => {
 
               {todaySales.length > 0 && (
                 <>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: tDiscount > 0 ? 6 : 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: tDiscount > 0 ? 6 : 8 }}>
                     <div style={{ background: "var(--app-success-surface)", borderRadius: 9, padding: "7px 8px" }}>
                       <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>💵 ສົດ</p>
                       <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-success)" }}>{fmtK(tCash)} ກີບ</p>
@@ -326,10 +322,6 @@ const Summary: React.FC = () => {
                     <div style={{ background: "var(--app-info-surface)", borderRadius: 9, padding: "7px 8px" }}>
                       <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>📱 ໂອນ</p>
                       <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-info)" }}>{fmtK(tQR)} ກີບ</p>
-                    </div>
-                    <div style={{ background: "var(--app-warning-surface)", borderRadius: 9, padding: "7px 8px" }}>
-                      <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>📦 COD</p>
-                      <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-warning)" }}>{fmtK(tCod)} ກີບ</p>
                     </div>
                   </div>
                   {tDiscount > 0 && (
@@ -544,9 +536,9 @@ const Summary: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar className="has-shop-tag">
+          <IonButtons slot="start"><IonMenuButton autoHide={false} /></IonButtons>
           <div slot="start"><ShopHeaderTag /></div>
           <IonTitle style={{ fontWeight: 700 }}>ສະຫຼຸບ</IonTitle>
-          <IonButtons slot="end"><IonMenuButton autoHide={false} /></IonButtons>
         </IonToolbar>
       </IonHeader>
 
@@ -588,7 +580,6 @@ const Summary: React.FC = () => {
                 loading={walletLoading}
                 cashBalance={cashBalance}
                 transferBalance={transferBalance}
-                codOutstanding={codOutstanding}
               />
 
               <div style={{ marginTop: 10 }}>
@@ -611,7 +602,7 @@ const Summary: React.FC = () => {
                       <p style={{ margin: "0 0 6px", fontSize: "0.73rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>
                         ລາຍຮັບແຍກຕາມປະເພດ
                       </p>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
                         <div style={{ background: "var(--app-success-surface)", borderRadius: 9, padding: "7px 8px" }}>
                           <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>💵 ສົດ</p>
                           <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-success)" }}>{fmtK(finIncomeCash)} ກີບ</p>
@@ -619,10 +610,6 @@ const Summary: React.FC = () => {
                         <div style={{ background: "var(--app-info-surface)", borderRadius: 9, padding: "7px 8px" }}>
                           <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>📱 ໂອນ</p>
                           <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-info)" }}>{fmtK(finIncomeTransfer)} ກີບ</p>
-                        </div>
-                        <div style={{ background: "var(--app-warning-surface)", borderRadius: 9, padding: "7px 8px" }}>
-                          <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>📦 COD</p>
-                          <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-warning)" }}>{fmtK(finIncomeCod)} ກີບ</p>
                         </div>
                       </div>
                     </>

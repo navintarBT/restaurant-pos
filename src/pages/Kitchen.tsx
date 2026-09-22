@@ -66,11 +66,11 @@ const Kitchen: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar className="has-shop-tag">
-          <div slot="start"><ShopHeaderTag /></div>
-          <IonTitle>ຫ້ອງຄົວ</IonTitle>
-          <IonButtons slot="end">
+          <IonButtons slot="start">
             <IonMenuButton autoHide={false} />
           </IonButtons>
+          <div slot="start"><ShopHeaderTag /></div>
+          <IonTitle>ຫ້ອງຄົວ</IonTitle>
         </IonToolbar>
       </IonHeader>
 

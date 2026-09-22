@@ -17,14 +17,18 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { getOpenSessions, closeSession } from "../data/tableSessionRepository";
 import { getOrdersBySession, closeBill } from "../data/saleRepository";
+import { getTableRoster, getServiceChargeSettings, tableDisplayLabel } from "../data/shopRepository";
 import { fmtK } from "../utils/format";
 import ShopHeaderTag from "../components/ShopHeaderTag";
 import EmptyState from "../components/EmptyState";
-import type { PaymentType, Sale, TableSession } from "../data/types";
+import type { PaymentType, Sale, SaleItem, TableSession } from "../data/types";
 
 interface TableBill {
   session: TableSession;
   orders: Sale[];
+  subtotal: number;
+  serviceChargePercent: number;
+  serviceChargeAmount: number;
   total: number;
 }
 
@@ -45,11 +49,23 @@ const CheckBill: React.FC = () => {
     if (!shopId) return;
     setLoading(true);
     try {
-      const sessions = await getOpenSessions(shopId);
+      const [sessions, roster, serviceChargeSettings] = await Promise.all([
+        getOpenSessions(shopId),
+        getTableRoster(shopId),
+        getServiceChargeSettings(shopId),
+      ]);
+      // session.tableLabel is the zone-combined identity (see
+      // tableDisplayLabel) — key this map the same way, or a table with a
+      // zone would never match and silently lose its service charge.
+      const rosterByLabel = new Map(roster.map((r) => [tableDisplayLabel(r.label, r.zone), r]));
       const withOrders = await Promise.all(
         sessions.map(async (session) => {
           const orders = await getOrdersBySession(shopId, session.id);
-          return { session, orders, total: orders.reduce((s, o) => s + o.total, 0) };
+          const subtotal = orders.reduce((s, o) => s + o.total, 0);
+          const chargeApplies = serviceChargeSettings.enabled && !!rosterByLabel.get(session.tableLabel)?.serviceCharge;
+          const serviceChargePercent = chargeApplies ? serviceChargeSettings.percent : 0;
+          const serviceChargeAmount = chargeApplies ? Math.round(subtotal * serviceChargeSettings.percent / 100) : 0;
+          return { session, orders, subtotal, serviceChargePercent, serviceChargeAmount, total: subtotal + serviceChargeAmount };
         })
       );
       // Tables that opened but never actually ordered anything aren't a bill yet.
@@ -72,7 +88,22 @@ const CheckBill: React.FC = () => {
     setClosing(true);
     setError(null);
     try {
-      await closeBill(shopId, target.orders.map((o) => o.id), paymentType);
+      let serviceCharge: { saleId: string; items: SaleItem[]; total: number } | undefined;
+      if (target.serviceChargeAmount > 0 && target.orders.length > 0) {
+        const first = target.orders[0];
+        const chargeItem: SaleItem = {
+          productId: "__service_charge__",
+          productName: `ຄ່າບໍລິການ (${target.serviceChargePercent}%)`,
+          variant: { size: "", color: "", stock: 0 },
+          quantity: 1,
+          originalPrice: target.serviceChargeAmount,
+          unitPrice: target.serviceChargeAmount,
+          costPrice: 0,
+          needsKitchen: false,
+        };
+        serviceCharge = { saleId: first.id, items: [...first.items, chargeItem], total: first.total + target.serviceChargeAmount };
+      }
+      await closeBill(shopId, target.orders.map((o) => o.id), paymentType, serviceCharge);
       await closeSession(shopId, target.session.id);
       setBills((prev) => prev.filter((b) => b.session.id !== target.session.id));
       setTarget(null);
@@ -87,11 +118,11 @@ const CheckBill: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar className="has-shop-tag">
-          <div slot="start"><ShopHeaderTag /></div>
-          <IonTitle>ເຊັກບິນ</IonTitle>
-          <IonButtons slot="end">
+          <IonButtons slot="start">
             <IonMenuButton autoHide={false} />
           </IonButtons>
+          <div slot="start"><ShopHeaderTag /></div>
+          <IonTitle>ເຊັກບິນ</IonTitle>
         </IonToolbar>
       </IonHeader>
 
@@ -169,12 +200,23 @@ const CheckBill: React.FC = () => {
                     ))}
                   </div>
                 ))}
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--app-border)",
-                }}>
-                  <span style={{ fontWeight: 700 }}>ຍອດລວມ ({target.orders.length} ອໍເດີ້)</span>
-                  <span style={{ fontWeight: 800, fontSize: "1.2rem", color: "var(--ion-color-primary)" }}>{fmtK(target.total)} ກີບ</span>
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--app-border)" }}>
+                  {target.serviceChargeAmount > 0 && (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", padding: "2px 0" }}>
+                        <span style={{ color: "var(--app-text-secondary)" }}>ຍອດລວມຍ່ອຍ</span>
+                        <span>{fmtK(target.subtotal)} ກີບ</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", padding: "2px 0" }}>
+                        <span style={{ color: "var(--app-text-secondary)" }}>ຄ່າບໍລິການ ({target.serviceChargePercent}%)</span>
+                        <span>{fmtK(target.serviceChargeAmount)} ກີບ</span>
+                      </div>
+                    </>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                    <span style={{ fontWeight: 700 }}>ຍອດລວມ ({target.orders.length} ອໍເດີ້)</span>
+                    <span style={{ fontWeight: 800, fontSize: "1.2rem", color: "var(--ion-color-primary)" }}>{fmtK(target.total)} ກີບ</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -187,7 +229,6 @@ const CheckBill: React.FC = () => {
                 [
                   { v: "cash" as const, label: "💵 ສົດ", color: "var(--app-success)" },
                   { v: "qr" as const, label: "📱 ໂອນ", color: "var(--app-info)" },
-                  { v: "cod" as const, label: "📦 COD", color: "var(--app-warning)" },
                 ]
               ).map(({ v, label, color }) => (
                 <button

@@ -101,7 +101,6 @@ export default function AllShopsDashboard({ shops, onBack }: Props) {
 
   const incCash = allIncomes.filter((i) => i.paymentType === "cash").reduce((s, i) => s + i.amount, 0);
   const incTransfer = allIncomes.filter((i) => i.paymentType === "transfer").reduce((s, i) => s + i.amount, 0);
-  const incCod = allIncomes.filter((i) => i.paymentType === "cod").reduce((s, i) => s + i.amount, 0);
   // Grand totals count every expense (shop + shared capital/general), unlike the
   // per-shop rows above which only reflect that shop's own "shop"-category costs.
   const totalExpense = allExpenses.reduce((s, e) => s + e.amount, 0);
@@ -197,7 +196,6 @@ export default function AllShopsDashboard({ shops, onBack }: Props) {
                       {[
                         { label: "💵 ເງິນສົດ", v: incCash },
                         { label: "📱 ໂອນ", v: incTransfer },
-                        { label: "📦 COD", v: incCod },
                       ].filter((r) => r.v > 0).map((r) => (
                         <div key={r.label} style={{ display: "flex", justifyContent: "space-between" }}>
                           <span style={{ fontSize: "0.76rem", color: "var(--app-text-secondary)" }}>{r.label}</span>

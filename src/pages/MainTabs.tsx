@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   IonBadge,
   IonContent,
+  IonFooter,
   IonHeader,
   IonIcon,
   IonItem,
@@ -12,8 +13,6 @@ import {
   IonModal,
   IonRouterOutlet,
   IonSpinner,
-  IonTabBar,
-  IonTabButton,
   IonTabs,
   IonTitle,
   IonToolbar,
@@ -35,6 +34,9 @@ import {
   flameOutline,
   checkmarkDoneOutline,
   cashOutline,
+  gridOutline,
+  mapOutline,
+  chevronDownOutline,
 } from "ionicons/icons";
 import { CartProvider } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
@@ -52,6 +54,10 @@ const TakeOrder = lazy(() => import("./TakeOrder"));
 const Kitchen = lazy(() => import("./Kitchen"));
 const Expedite = lazy(() => import("./Expedite"));
 const CheckBill = lazy(() => import("./CheckBill"));
+const ManageTables = lazy(() => import("./ManageTables"));
+const ManageZones = lazy(() => import("./ManageZones"));
+const TableForm = lazy(() => import("./TableForm"));
+const CreateZone = lazy(() => import("./CreateZone"));
 
 function RouteFallback() {
   return (
@@ -89,6 +95,8 @@ const MainTabs: React.FC = () => {
   const { count: alertCount, refresh: refreshAlerts } = useStockAlertCount(shopId);
   const [showExpiryAlert, setShowExpiryAlert] = useState(false);
   const [myProfileOpen, setMyProfileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [salesOpen, setSalesOpen] = useState(false);
 
   useEffect(() => {
     if (tenant && !tenant.isExpired && tenant.daysLeft !== null && tenant.daysLeft <= 7) {
@@ -115,75 +123,121 @@ const MainTabs: React.FC = () => {
     import("./Kitchen");
     import("./Expedite");
     import("./CheckBill");
+    import("./ManageTables");
+    import("./ManageZones");
+    import("./TableForm");
+    import("./CreateZone");
   }, []);
 
   return (
     <CartProvider>
-      <IonMenu contentId="main-content" side="end">
+      <IonMenu contentId="main-content" side="start">
         <IonHeader>
           <IonToolbar>
             <IonTitle>ເມນູ</IonTitle>
           </IonToolbar>
+          {/* ── Profile header — fixed, doesn't scroll away with the list ── */}
+          <div style={{
+            padding: "24px 18px 20px",
+            textAlign: "center",
+            background: `
+              radial-gradient(circle, rgba(255,255,255,0.15) 1px, transparent 1px),
+              linear-gradient(135deg, var(--app-accent-surface), var(--app-surface))
+            `,
+            backgroundSize: "18px 18px, 100% 100%",
+            borderBottom: "1px solid var(--app-border)",
+          }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: "50%",
+              background: "var(--app-surface)",
+              border: "3px solid var(--ion-color-primary)",
+              boxShadow: "0 4px 14px rgba(224,123,57,0.28)",
+              overflow: "hidden",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 12px",
+            }}>
+              {myProfileUrl || shopProfile?.profileUrl ? (
+                <img src={myProfileUrl ?? shopProfile?.profileUrl} alt={shopProfile?.name ?? "profile"} decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <IonIcon icon={businessOutline} style={{ fontSize: 32, color: "var(--ion-color-primary)" }} />
+              )}
+            </div>
+            <h2 style={{
+              margin: 0, color: "var(--ion-text-color)", fontSize: "1.1rem", fontWeight: 800,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {shopProfile?.name ?? "Minny ONE"}
+            </h2>
+            <span style={{
+              display: "inline-block", marginTop: 8, padding: "3px 12px", borderRadius: 20,
+              background: role === "customer" ? "var(--ion-color-primary)" : "#0f766e",
+              color: "#fff", fontSize: "0.7rem", fontWeight: 700,
+            }}>
+              {role === "customer" ? "ເຈົ້າຂອງຮ້ານ" : "ພະນັກງານ"}
+            </span>
+          </div>
         </IonHeader>
         <IonContent>
-          <div style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
-            {/* ── Profile header ── */}
-            <div style={{
-              padding: "24px 18px 20px",
-              textAlign: "center",
-              background: `
-                radial-gradient(circle, rgba(255,255,255,0.15) 1px, transparent 1px),
-                linear-gradient(135deg, var(--app-accent-surface), var(--app-surface))
-              `,
-              backgroundSize: "18px 18px, 100% 100%",
-              borderBottom: "1px solid var(--app-border)",
-            }}>
-              <div style={{
-                width: 72, height: 72, borderRadius: "50%",
-                background: "var(--app-surface)",
-                border: "3px solid var(--ion-color-primary)",
-                boxShadow: "0 4px 14px rgba(224,123,57,0.28)",
-                overflow: "hidden",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                margin: "0 auto 12px",
-              }}>
-                {myProfileUrl || shopProfile?.profileUrl ? (
-                  <img src={myProfileUrl ?? shopProfile?.profileUrl} alt={shopProfile?.name ?? "profile"} decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                ) : (
-                  <IonIcon icon={businessOutline} style={{ fontSize: 32, color: "var(--ion-color-primary)" }} />
-                )}
-              </div>
-              <h2 style={{
-                margin: 0, color: "var(--ion-text-color)", fontSize: "1.1rem", fontWeight: 800,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {shopProfile?.name ?? "Minny ONE"}
-              </h2>
-              <span style={{
-                display: "inline-block", marginTop: 8, padding: "3px 12px", borderRadius: 20,
-                background: role === "customer" ? "var(--ion-color-primary)" : "#0f766e",
-                color: "#fff", fontSize: "0.7rem", fontWeight: 700,
-              }}>
-                {role === "customer" ? "ເຈົ້າຂອງຮ້ານ" : "ພະນັກງານ"}
-              </span>
-            </div>
+          {/* ── Menu sections — the only part that scrolls ── */}
+          <div style={{ padding: "8px 0" }}>
+              <IonList lines="none">
+                <IonMenuToggle autoHide={false}>
+                  <IonItem button detail={false} routerLink="/tabs/sell" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                    <IonIcon slot="start" icon={cartOutline} color="primary" />
+                    <IonLabel style={{ fontWeight: 600 }}>ຂາຍ (ໜ້າບາໂຊ/ຊື້ກັບ)</IonLabel>
+                  </IonItem>
+                </IonMenuToggle>
+              </IonList>
 
-            {/* ── Menu sections ── */}
-            <div style={{ flex: 1, padding: "8px 0" }}>
-              {(permissions.canTakeOrders || permissions.canCook || permissions.canExpedite) && (
+              {permissions.canTakeOrders && (
+                <>
+                  <button
+                    onClick={() => setSalesOpen((v) => !v)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      width: "100%", padding: "12px 18px 6px", background: "none", border: "none", cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>ການຂາຍ</span>
+                    <IonIcon
+                      icon={chevronDownOutline}
+                      style={{
+                        fontSize: "0.85rem", color: "var(--app-text-muted)",
+                        transform: salesOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s",
+                      }}
+                    />
+                  </button>
+                  {salesOpen && (
+                    <IonList lines="none">
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/take-order" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={receiptOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ອໍເດີ້</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/check-bill" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={cashOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ເຊັກບິນ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/history" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={timeOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ປະຫວັດການຂາຍ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                    </IonList>
+                  )}
+                </>
+              )}
+
+              {(permissions.canCook || permissions.canExpedite) && (
                 <>
                   <div style={{ padding: "12px 18px 6px", fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>
                     ລະບົບສັ່ງອາຫານ
                   </div>
                   <IonList lines="none">
-                    {permissions.canTakeOrders && (
-                      <IonMenuToggle autoHide={false}>
-                        <IonItem button detail={false} routerLink="/tabs/take-order" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                          <IonIcon slot="start" icon={receiptOutline} color="primary" />
-                          <IonLabel style={{ fontWeight: 600 }}>ຮັບອໍເດີ້</IonLabel>
-                        </IonItem>
-                      </IonMenuToggle>
-                    )}
                     {permissions.canCook && (
                       <IonMenuToggle autoHide={false}>
                         <IonItem button detail={false} routerLink="/tabs/kitchen" style={{ "--background-hover": "var(--app-accent-surface)" }}>
@@ -200,17 +254,73 @@ const MainTabs: React.FC = () => {
                         </IonItem>
                       </IonMenuToggle>
                     )}
-                    {permissions.canTakeOrders && (
-                      <IonMenuToggle autoHide={false}>
-                        <IonItem button detail={false} routerLink="/tabs/check-bill" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                          <IonIcon slot="start" icon={cashOutline} color="primary" />
-                          <IonLabel style={{ fontWeight: 600 }}>ເຊັກບິນ</IonLabel>
-                        </IonItem>
-                      </IonMenuToggle>
-                    )}
                   </IonList>
                 </>
               )}
+
+              {permissions.canTakeOrders && (
+                <>
+                  <button
+                    onClick={() => setSettingsOpen((v) => !v)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      width: "100%", padding: "12px 18px 6px", background: "none", border: "none", cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>ຕັ້ງຄ່າ</span>
+                    <IonIcon
+                      icon={chevronDownOutline}
+                      style={{
+                        fontSize: "0.85rem", color: "var(--app-text-muted)",
+                        transform: settingsOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s",
+                      }}
+                    />
+                  </button>
+                  {settingsOpen && (
+                    <IonList lines="none">
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/manage-tables" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={gridOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ຈັດການໂຕະ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/manage-zones" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={mapOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ຈັດການໂຊນ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                    </IonList>
+                  )}
+                </>
+              )}
+
+              <div style={{ padding: "12px 18px 6px", fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>
+                ຮ້ານ
+              </div>
+              <IonList lines="none">
+                <IonMenuToggle autoHide={false}>
+                  <IonItem button detail={false} routerLink="/tabs/products" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                    <IonIcon slot="start" icon={restaurantOutline} color="primary" />
+                    <IonLabel style={{ fontWeight: 600 }}>ເມນູ</IonLabel>
+                    {alertCount > 0 && <IonBadge color="danger">{alertCount}</IonBadge>}
+                  </IonItem>
+                </IonMenuToggle>
+                <IonMenuToggle autoHide={false}>
+                  <IonItem button detail={false} routerLink="/tabs/finance" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                    <IonIcon slot="start" icon={walletOutline} color="primary" />
+                    <IonLabel style={{ fontWeight: 600 }}>ການເງິນ</IonLabel>
+                  </IonItem>
+                </IonMenuToggle>
+                {(features.returnSummaryEnabled || features.monthlySummaryEnabled) && canViewFinance && (
+                  <IonMenuToggle autoHide={false}>
+                    <IonItem button detail={false} routerLink="/tabs/summary" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                      <IonIcon slot="start" icon={barChartOutline} color="primary" />
+                      <IonLabel style={{ fontWeight: 600 }}>ສະຫຼຸບ</IonLabel>
+                    </IonItem>
+                  </IonMenuToggle>
+                )}
+              </IonList>
 
               {role === "customer" && (
                 <>
@@ -259,17 +369,18 @@ const MainTabs: React.FC = () => {
                   </IonItem>
                 </IonMenuToggle>
               </IonList>
-            </div>
-
-            {/* ── Brand footer ── */}
-            <div style={{ padding: "16px 18px", textAlign: "center", borderTop: "1px solid var(--app-border)" }}>
-              <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: "1rem", lineHeight: 1 }}>
-                <span style={{ color: "var(--ion-text-color)" }}>Minny</span><span style={{ color: "var(--ion-color-primary)" }}>One</span>
-              </div>
-              <p style={{ margin: "4px 0 0", fontSize: "0.68rem", color: "var(--app-text-muted)" }}>ລະບົບຂາຍອາຫານ</p>
-            </div>
           </div>
         </IonContent>
+
+        {/* ── Brand footer — fixed, doesn't get pushed off-screen by a long list ── */}
+        <IonFooter>
+          <div style={{ padding: "16px 18px", textAlign: "center", borderTop: "1px solid var(--app-border)" }}>
+            <div style={{ fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: "1rem", lineHeight: 1 }}>
+              <span style={{ color: "var(--ion-text-color)" }}>Minny</span><span style={{ color: "var(--ion-color-primary)" }}>One</span>
+            </div>
+            <p style={{ margin: "4px 0 0", fontSize: "0.68rem", color: "var(--app-text-muted)" }}>ລະບົບຂາຍອາຫານ</p>
+          </div>
+        </IonFooter>
       </IonMenu>
 
       <MyProfileModal isOpen={myProfileOpen} onDismiss={() => setMyProfileOpen(false)} />
@@ -376,34 +487,30 @@ const MainTabs: React.FC = () => {
               <Suspense fallback={<RouteFallback />}><CheckBill /></Suspense>
             </Route>
           )}
-          <Route exact path="/tabs"><Redirect to="/tabs/sell" /></Route>
-        </IonRouterOutlet>
-
-        <IonTabBar slot="bottom" onIonTabsDidChange={refreshAlerts}>
-          <IonTabButton tab="sell" href="/tabs/sell">
-            <IonIcon icon={cartOutline} />
-            <IonLabel>ຂາຍ</IonLabel>
-          </IonTabButton>
-          <IonTabButton tab="products" href="/tabs/products">
-            <IonIcon icon={restaurantOutline} />
-            <IonLabel>ເມນູ</IonLabel>
-            {alertCount > 0 && <IonBadge color="danger">{alertCount}</IonBadge>}
-          </IonTabButton>
-          <IonTabButton tab="history" href="/tabs/history">
-            <IonIcon icon={timeOutline} />
-            <IonLabel>ປະຫວັດການຂາຍ</IonLabel>
-          </IonTabButton>
-          <IonTabButton tab="finance" href="/tabs/finance">
-            <IonIcon icon={walletOutline} />
-            <IonLabel>ການເງິນ</IonLabel>
-          </IonTabButton>
-          {(features.returnSummaryEnabled || features.monthlySummaryEnabled) && canViewFinance && (
-            <IonTabButton tab="summary" href="/tabs/summary">
-              <IonIcon icon={barChartOutline} />
-              <IonLabel>ສະຫຼຸບ</IonLabel>
-            </IonTabButton>
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/manage-tables">
+              <Suspense fallback={<RouteFallback />}><ManageTables /></Suspense>
+            </Route>
           )}
-        </IonTabBar>
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/manage-zones">
+              <Suspense fallback={<RouteFallback />}><ManageZones /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/create-table/:key?">
+              <Suspense fallback={<RouteFallback />}><TableForm /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/create-zone">
+              <Suspense fallback={<RouteFallback />}><CreateZone /></Suspense>
+            </Route>
+          )}
+          <Route exact path="/tabs">
+            <Redirect to={permissions.canTakeOrders ? "/tabs/take-order" : "/tabs/products"} />
+          </Route>
+        </IonRouterOutlet>
       </IonTabs>
     </CartProvider>
   );

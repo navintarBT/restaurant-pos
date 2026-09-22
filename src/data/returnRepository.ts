@@ -34,19 +34,6 @@ export async function getReturnsByDateRange(
   });
 }
 
-export async function getCodReturns(shopId: string): Promise<ReturnRecord[]> {
-  const q = query(returnsCol(shopId), where("paymentType", "==", "cod"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => {
-    const data = d.data();
-    return {
-      id: d.id,
-      ...data,
-      createdAt: (data.createdAt as Timestamp).toDate(),
-    } as ReturnRecord;
-  });
-}
-
 /** Deletes a return log and reverses the stock it had added back (clamped at 0). */
 export async function deleteReturn(shopId: string, record: ReturnRecord): Promise<void> {
   const productRef = doc(db, "shops", shopId, "products", record.productId);

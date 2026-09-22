@@ -207,7 +207,10 @@ const Sell: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar className="has-shop-tag">
-          <div slot="start"><ShopHeaderTag /></div>
+          <div slot="start" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <IonMenuButton autoHide={false} style={{ "--color": "#ffffff" }} />
+            <ShopHeaderTag />
+          </div>
           <IonTitle style={{ fontWeight: 700 }}>ຂາຍ</IonTitle>
           <div slot="end" style={{ paddingRight: 8, display: "flex", alignItems: "center", gap: 4 }}>
             <IonButton fill="clear" onClick={() => setCartOpen(true)}
@@ -223,7 +226,6 @@ const Sell: React.FC = () => {
                 </IonBadge>
               )}
             </IonButton>
-            <IonMenuButton autoHide={false} style={{ "--color": "#ffffff" }} />
           </div>
         </IonToolbar>
       </IonHeader>

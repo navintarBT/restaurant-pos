@@ -96,16 +96,35 @@ service cloud.firestore {
       // tenants/{shopId}.
       allow read: if isAnyAuthed();
       allow create, delete: if isControlAdmin();
-      allow update: if isControlAdmin() || (
-        isTenantActive(shopId)
-        && isShopOwner(shopId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'profileUrl', 'updatedAt'])
-        && request.resource.data.name is string
-        && (
-          !('profileUrl' in request.resource.data)
-          || request.resource.data.profileUrl is string
+      allow update: if isControlAdmin() || (isTenantActive(shopId) && (
+        (
+          isShopOwner(shopId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'profileUrl', 'updatedAt'])
+          && request.resource.data.name is string
+          && (
+            !('profileUrl' in request.resource.data)
+            || request.resource.data.profileUrl is string
+          )
         )
-      );
+        // Table roster + zones + service charge — settings behind "ເລືອກໂຕະ"
+        // and its "ຈັດການໂຕະ" / "ຈັດການໂຊນ" pages.
+        || (
+          (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tableRoster', 'tableZones', 'serviceCharge', 'updatedAt'])
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['tableRoster'])
+            || request.resource.data.tableRoster is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['tableZones'])
+            || request.resource.data.tableZones is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['serviceCharge'])
+            || request.resource.data.serviceCharge is map
+          )
+        )
+      ));
 
       match /products/{productId} {
         // Public menu read (see shops/{shopId} above — same reasoning).
@@ -182,12 +201,18 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'servedAt'])
             && resource.data.status == 'ready' && request.resource.data.status == 'served'
           )
-          // Close bill: served -> paid (records the payment)
+          // Close bill: served -> paid (records the payment). May also fold a
+          // service-charge line item into `items`/`total` on exactly one of
+          // the table's tickets at the same time (see closeBill()).
           || (
             (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'paymentType', 'paidAt'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'paymentType', 'paidAt', 'items', 'total'])
             && resource.data.status != 'paid' && request.resource.data.status == 'paid'
-            && request.resource.data.paymentType in ['cash', 'qr', 'cod']
+            && request.resource.data.paymentType in ['cash', 'qr']
+            && (
+              !request.resource.data.diff(resource.data).affectedKeys().hasAny(['total'])
+              || (request.resource.data.total is number && request.resource.data.total >= 0)
+            )
           )
         ));
         allow delete: if isControlAdmin()
@@ -231,7 +256,7 @@ service cloud.firestore {
           && request.resource.data.keys().hasAll(['description', 'amount', 'paymentType', 'createdAt'])
           && request.resource.data.amount is number
           && request.resource.data.amount > 0
-          && request.resource.data.paymentType in ['cash', 'transfer', 'cod'];
+          && request.resource.data.paymentType in ['cash', 'transfer'];
         allow update: if isTenantActive(shopId)
           && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canAddExpenses'))
           && request.resource.data.keys().hasAll(['description', 'amount', 'paymentType'])
@@ -355,7 +380,7 @@ service cloud.firestore {
       return data.keys().hasAll(['items', 'total', 'paymentType', 'createdAt'])
         && data.total is number
         && data.total > 0
-        && (data.paymentType == 'cash' || data.paymentType == 'qr' || data.paymentType == 'cod')
+        && (data.paymentType == 'cash' || data.paymentType == 'qr')
         && data.status == 'paid';
     }
 

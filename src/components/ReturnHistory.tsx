@@ -16,10 +16,9 @@ interface Props {
   onDismiss: () => void;
 }
 
-const PAYMENT_BADGE: Record<"cash" | "transfer" | "cod", { label: string; bg: string; color: string }> = {
+const PAYMENT_BADGE: Record<"cash" | "transfer", { label: string; bg: string; color: string }> = {
   cash: { label: "💵 ສົດ", bg: "var(--app-success-surface)", color: "var(--app-success)" },
   transfer: { label: "📱 ໂອນ", bg: "var(--app-info-surface)", color: "var(--app-info)" },
-  cod: { label: "📦 COD", bg: "var(--app-warning-surface)", color: "var(--app-warning)" },
 };
 
 const ReturnHistory: React.FC<Props> = ({ isOpen, shopId, onDismiss }) => {
