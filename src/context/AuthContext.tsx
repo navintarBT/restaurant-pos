@@ -44,6 +44,11 @@ interface AuthState {
   blocked: boolean;
   loading: boolean;
   permissions: StaffPermissions;
+  // If true, this staff member may only take orders in `allowedZones`
+  // (see UserPermissions.tsx / TableRosterEntry.zone) instead of every zone.
+  // Always false/empty for the owner.
+  zoneRestricted: boolean;
+  allowedZones: string[];
   features: ShopFeatures;
   shopProfile: ShopProfile | null;
   myProfileUrl: string | null;
@@ -97,7 +102,7 @@ const NO_PERMISSIONS: StaffPermissions = {
 const BLANK_STATE: AuthState = {
   user: null, shopId: null, role: null, displayName: "",
   tenant: null, blocked: false, loading: false,
-  permissions: NO_PERMISSIONS, features: DEFAULT_FEATURES,
+  permissions: NO_PERMISSIONS, zoneRestricted: false, allowedZones: [], features: DEFAULT_FEATURES,
   shopProfile: null, myProfileUrl: null, availableShops: [], needsShopPick: false,
 };
 
@@ -106,6 +111,8 @@ async function loadShopData(user: User, userData: Record<string, unknown>, shopI
   let tenant: TenantInfo | null = null;
   let blocked = false;
   let permissions: StaffPermissions = NO_PERMISSIONS;
+  let zoneRestricted = false;
+  let allowedZones: string[] = [];
   let displayName = user.email ?? "";
   let features: ShopFeatures = DEFAULT_FEATURES;
   let shopProfile: ShopProfile = { id: shopId, name: "Minny ONE" };
@@ -137,6 +144,8 @@ async function loadShopData(user: User, userData: Record<string, unknown>, shopI
       };
       const dn = su?.displayName as string | undefined;
       if (dn) displayName = dn;
+      zoneRestricted = !!su?.zoneRestricted;
+      allowedZones = (su?.allowedZones as string[] | undefined) ?? [];
     } catch {
       permissions = NO_PERMISSIONS;
     }
@@ -159,7 +168,7 @@ async function loadShopData(user: User, userData: Record<string, unknown>, shopI
     };
   } catch { /* shop rules may not allow yet */ }
 
-  return { role, tenant, blocked, permissions, displayName, features, shopProfile };
+  return { role, tenant, blocked, permissions, zoneRestricted, allowedZones, displayName, features, shopProfile };
 }
 
 function savedShopKey(uid: string) {
@@ -234,7 +243,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setState({
           user, shopId, role: shopData.role, displayName: shopData.displayName,
           tenant: shopData.tenant, blocked: shopData.blocked, loading: false,
-          permissions: shopData.permissions, features: shopData.features,
+          permissions: shopData.permissions,
+          zoneRestricted: shopData.zoneRestricted, allowedZones: shopData.allowedZones,
+          features: shopData.features,
           shopProfile: shopData.shopProfile, myProfileUrl,
           availableShops, needsShopPick: false,
         });
@@ -248,7 +259,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setState({
           user, shopId: saved, role: shopData.role, displayName: shopData.displayName,
           tenant: shopData.tenant, blocked: shopData.blocked, loading: false,
-          permissions: shopData.permissions, features: shopData.features,
+          permissions: shopData.permissions,
+          zoneRestricted: shopData.zoneRestricted, allowedZones: shopData.allowedZones,
+          features: shopData.features,
           shopProfile: shopData.shopProfile, myProfileUrl,
           availableShops, needsShopPick: false,
         });
@@ -259,7 +272,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setState({
         user, shopId: null, role: role as "customer" | "staff", displayName: user.email ?? "",
         tenant: null, blocked: false, loading: false,
-        permissions: NO_PERMISSIONS, features: DEFAULT_FEATURES,
+        permissions: NO_PERMISSIONS, zoneRestricted: false, allowedZones: [], features: DEFAULT_FEATURES,
         shopProfile: null, myProfileUrl,
         availableShops, needsShopPick: true,
       });
@@ -292,6 +305,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       blocked: shopData.blocked,
       loading: false,
       permissions: shopData.permissions,
+      zoneRestricted: shopData.zoneRestricted,
+      allowedZones: shopData.allowedZones,
       features: shopData.features,
       shopProfile: shopData.shopProfile,
       myProfileUrl,

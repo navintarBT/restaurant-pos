@@ -69,7 +69,7 @@ const STATUS_LABEL: Record<TableStatus, { text: string; color: string; bg: strin
 };
 
 const TakeOrder: React.FC = () => {
-  const { shopId, user, displayName } = useAuth();
+  const { shopId, user, displayName, zoneRestricted, allowedZones } = useAuth();
 
   // ── Step 1: pick or open a table ──────────────────────────────────────
   const [step, setStep] = useState<"select-table" | "menu">("select-table");
@@ -183,7 +183,15 @@ const TakeOrder: React.FC = () => {
     return result;
   })();
 
-  const zones = [...new Set(roster.map((r) => r.zone).filter(Boolean) as string[])];
+  // A zone-restricted server (see UserPermissions.tsx "3. ໂຊນ") only ever
+  // sees tiles for their own allowed zone(s) — filtered here, before search
+  // and the zone/status chips, so it can't be bypassed through those and the
+  // zone chip list itself only offers zones they can actually use.
+  const visibleTiles = zoneRestricted
+    ? allTiles.filter((t) => !!t.zone && allowedZones.includes(t.zone))
+    : allTiles;
+
+  const zones = [...new Set(visibleTiles.map((r) => r.zone).filter(Boolean) as string[])];
 
   // "ກຳລັງໃຊ້ງານ" groups busy/ready/served (an order is actively moving) —
   // "ລໍຖ້າ(ລູກຄ້າຢືນຢັນ)" is the "empty" status specifically: a session is
@@ -204,7 +212,7 @@ const TakeOrder: React.FC = () => {
   // Search-only baseline (ignores the zone/status chips themselves) — each
   // chip's own count is how many tables it would show, computed off this so
   // the counts stay independent of whichever OTHER chip is active.
-  const searchFiltered = allTiles.filter((t) => {
+  const searchFiltered = visibleTiles.filter((t) => {
     const q = tableSearch.trim().toLowerCase();
     if (!q) return true;
     return t.label.toLowerCase().includes(q) || (t.zone ?? "").toLowerCase().includes(q);
@@ -447,7 +455,10 @@ const TakeOrder: React.FC = () => {
           {!tablesLoading && allTiles.length === 0 && (
             <EmptyState icon="🪑" title="ຍັງບໍ່ມີໂຕະ" subtitle="ກົດໄອຄອນຕັ້ງຄ່າດ້ານເທິງເພື່ອເພີ່ມລາຍການໂຕະ" />
           )}
-          {!tablesLoading && allTiles.length > 0 && tiles.length === 0 && (
+          {!tablesLoading && allTiles.length > 0 && visibleTiles.length === 0 && (
+            <EmptyState icon="🚫" title="ບໍ່ມີໂຕະໃນໂຊນທີ່ທ່ານໄດ້ຮັບອະນຸຍາດ" subtitle={`ອະນຸຍາດສະເພາະ: ${allowedZones.join(", ") || "ບໍ່ມີ"}`} />
+          )}
+          {!tablesLoading && visibleTiles.length > 0 && tiles.length === 0 && (
             <EmptyState icon="🔍" title="ບໍ່ພົບໂຕະທີ່ຄົ້ນຫາ" />
           )}
 

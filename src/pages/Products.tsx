@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   IonPage,
   IonHeader,
@@ -17,16 +17,14 @@ import {
   IonSpinner,
   IonButtons,
   IonButton,
-  IonBadge,
   IonMenuButton,
 } from "@ionic/react";
-import { addOutline, notificationsOutline, cubeOutline, returnUpBackOutline } from "ionicons/icons";
+import { addOutline, cubeOutline, returnUpBackOutline } from "ionicons/icons";
 import { useAuth } from "../context/AuthContext";
 import { getProducts, addProduct, updateProduct, deleteProduct } from "../data/productRepository";
 import { getCategories } from "../data/categoryRepository";
 import ProductCard from "../components/ProductCard";
 import ProductForm from "../components/ProductForm";
-import StockAlertSheet from "../components/StockAlertSheet";
 import InventoryReportSheet from "../components/InventoryReportSheet";
 import ProductDetailSheet from "../components/ProductDetailSheet";
 import BundleManager from "../components/BundleManager";
@@ -50,7 +48,6 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
   const [editing, setEditing] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [alertOpen, setAlertOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
@@ -61,11 +58,6 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
   const isAdmin = permissions.canManageProducts;
   const isOwner = role === "customer";
   const canViewFinance = isOwner || permissions.canViewFinance;
-
-  const alertCount = useMemo(() =>
-    products.filter((p) => p.variants.some((v) => v.stock <= (v.minStock ?? 5))).length,
-    [products]
-  );
 
   const load = useCallback(async () => {
     if (!shopId) return;
@@ -138,22 +130,6 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
           <IonButtons slot="end">
             <IonButton onClick={() => setInventoryOpen(true)}>
               <IonIcon slot="icon-only" icon={cubeOutline} />
-            </IonButton>
-
-            <IonButton onClick={() => setAlertOpen(true)} style={{ position: "relative" }}>
-              <IonIcon slot="icon-only" icon={notificationsOutline} />
-              {alertCount > 0 && (
-                <IonBadge
-                  style={{
-                    position: "absolute", top: 4, right: 2,
-                    fontSize: "0.6rem", minWidth: 16, height: 16,
-                    borderRadius: 8, padding: "0 3px",
-                    background: "var(--app-danger)", color: "#ffffff", fontWeight: 700,
-                  }}
-                >
-                  {alertCount}
-                </IonBadge>
-              )}
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -292,12 +268,6 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         products={products}
         canViewFinance={canViewFinance}
         onDismiss={() => setInventoryOpen(false)}
-      />
-
-      <StockAlertSheet
-        isOpen={alertOpen}
-        products={products}
-        onDismiss={() => setAlertOpen(false)}
       />
 
       <ProductForm

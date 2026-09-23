@@ -8,7 +8,7 @@ import {
 } from "@ionic/react";
 import { chevronBackOutline, chevronForwardOutline, personOutline, trashOutline, chevronDownOutline, chevronUpOutline, returnUpBackOutline, createOutline, closeOutline } from "ionicons/icons";
 import { useAuth } from "../context/AuthContext";
-import { getSalesByDateRange, deleteSale, removeItemFromSale, updateItemPrice, splitItemPrice } from "../data/saleRepository";
+import { getSalesByDateRange, cancelSale, removeItemFromSale, updateItemPrice, splitItemPrice } from "../data/saleRepository";
 import { getShopUsers } from "../data/shopRepository";
 import type { Sale, ShopUser, PaymentType } from "../data/types";
 import { fmtK, fmtVariant, fmtDate, fmtTime, fmtDateTime } from "../utils/format";
@@ -55,7 +55,7 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, icon, bg, color }) =>
 );
 
 const SalesHistory: React.FC = () => {
-  const { shopId, role, permissions } = useAuth();
+  const { shopId, role, permissions, user, displayName } = useAuth();
   const isOwner = role === "customer";
   const [view, setView] = useState<"all" | "staff">("all");
   const [sales, setSales] = useState<Sale[]>([]);
@@ -157,16 +157,29 @@ const SalesHistory: React.FC = () => {
     }
   }
 
-  async function handleDeleteSale(restoreStock: boolean) {
-    if (!shopId || !deleteTarget) return;
+  async function handleCancelSale(reason: string): Promise<boolean> {
+    if (!shopId || !deleteTarget || !user) return false;
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setDeleteError("ກະລຸນາລະບຸເຫດຜົນ");
+      return false;
+    }
     const target = deleteTarget;
     setDeleteTarget(null);
     setDeletingId(target.id);
     try {
-      await deleteSale(shopId, target, restoreStock);
+      // Soft-cancel (keeps the doc, flagged status:"cancelled" with a
+      // reason) instead of the old hard-delete — shows up afterward in
+      // "ປະຫວັດການຍົກເລີກບິນ" rather than disappearing without a trace.
+      await cancelSale(shopId, target, {
+        reason: trimmed, restoreStock: deleteRestoreStock,
+        cancelledByUid: user.uid, cancelledByName: displayName,
+      });
       setSales(prev => prev.filter(s => s.id !== target.id));
+      return true;
     } catch {
-      setDeleteError("ລຶບບໍ່ສຳເລັດ, ກະລຸນາລອງໃໝ່");
+      setDeleteError("ຍົກເລີກບໍ່ສຳເລັດ, ກະລຸນາລອງໃໝ່");
+      return false;
     } finally {
       setDeletingId(null);
     }
@@ -615,7 +628,7 @@ const SalesHistory: React.FC = () => {
                                 </button>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setDeleteRestoreStock(false); setDeleteTarget(sale); }}
-                                  title="ລຶບປະຫວັດ (ບໍ່ຄືນສະຕັອກ)"
+                                  title="ຍົກເລີກການຂາຍ (ບໍ່ຄືນສະຕັອກ)"
                                   style={{
                                     background: "none", border: "none", padding: "6px 4px",
                                     cursor: "pointer", lineHeight: 0, color: "#d1d5db", borderRadius: 6,
@@ -965,18 +978,19 @@ const SalesHistory: React.FC = () => {
 
       <IonAlert
         isOpen={!!deleteTarget}
-        header={deleteRestoreStock ? "ຍົກເລີກການຂາຍ" : "ລຶບປະຫວັດ"}
+        header="ຍົກເລີກການຂາຍ"
         message={
           deleteTarget
-            ? `ລາຍການ ${fmtK(deleteTarget.total)} ກີບ — ${deleteRestoreStock ? "ເມນູຈະຄືນສູ່ສະຕັອກ" : "ຈະບໍ່ຄືນສະຕັອກ, ລຶບຖາວອນ"}`
+            ? `ລາຍການ ${fmtK(deleteTarget.total)} ກີບ — ${deleteRestoreStock ? "ເມນູຈະຄືນສູ່ສະຕັອກ" : "ຈະບໍ່ຄືນສະຕັອກ"}`
             : ""
         }
+        inputs={[{ name: "reason", type: "textarea", placeholder: "ເຫດຜົນທີ່ຍົກເລີກ (ຈຳເປັນ)" }]}
         buttons={[
-          { text: "ຍົກເລີກ", role: "cancel", handler: () => setDeleteTarget(null) },
+          { text: "ປິດ", role: "cancel", handler: () => setDeleteTarget(null) },
           {
-            text: deleteRestoreStock ? "ຍົກເລີກການຂາຍ" : "ລຶບ",
+            text: "ຢືນຢັນຍົກເລີກ",
             role: "destructive",
-            handler: () => handleDeleteSale(deleteRestoreStock),
+            handler: async (data: { reason?: string }) => handleCancelSale(data.reason ?? ""),
           },
         ]}
         onDidDismiss={() => setDeleteTarget(null)}

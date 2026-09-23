@@ -10,18 +10,17 @@ import {
   IonMenuButton,
   IonPage,
   IonSpinner,
-  IonText,
   IonTitle,
   IonToolbar,
   useIonViewWillEnter,
 } from "@ionic/react";
-import { alertCircleOutline, businessOutline, checkmarkCircleOutline, closeOutline, createOutline, mailOutline, receiptOutline, ribbonOutline, saveOutline } from "ionicons/icons";
+import { alertCircleOutline, businessOutline, checkmarkCircleOutline, chevronBackOutline, chevronForwardOutline, closeOutline, createOutline, mailOutline, personCircleOutline, ribbonOutline, saveOutline } from "ionicons/icons";
 import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import ImagePicker from "../components/ImagePicker";
 import { useAuth } from "../context/AuthContext";
 import { auth } from "../firebase";
 import { uploadProductImage } from "../data/imageRepository";
-import { getShopProfile, updateShopProfile, updateOwnerEmail, getServiceChargeSettings, setServiceChargeSettings } from "../data/shopRepository";
+import { getShopProfile, updateShopProfile, updateOwnerEmail, updateMyProfilePhoto } from "../data/shopRepository";
 import type { ShopProfile } from "../data/types";
 
 const STATUS_LABELS: Record<string, { label: string; color: string; bg: string }> = {
@@ -82,7 +81,12 @@ interface Props {
 }
 
 const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
-  const { shopId, role, tenant, user, signOut } = useAuth();
+  const { shopId, role, tenant, user, signOut, availableShops, switchShop, myProfileUrl, setMyProfileUrl } = useAuth();
+  const isOwner = role === "customer";
+  // Landing choice between the two profiles that used to be separate pages
+  // (see git history / MyProfileModal) — staff only ever has "personal" to
+  // look at, so they skip the menu and land straight there.
+  const [view, setView] = useState<"menu" | "shop" | "personal">(isOwner ? "menu" : "personal");
   const [shop, setShop] = useState<ShopProfile | null>(null);
   const [name, setName] = useState("");
   const [profileUrl, setProfileUrl] = useState("");
@@ -100,13 +104,40 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailMessage, setEmailMessage] = useState<string | null>(null);
 
-  const [scEnabled, setScEnabled] = useState(false);
-  const [scPercent, setScPercent] = useState("0");
-  const [scSaving, setScSaving] = useState(false);
-  const [scMessage, setScMessage] = useState<string | null>(null);
-  const [scMessageError, setScMessageError] = useState(false);
+  // "My" personal photo — shown to every signed-in user (owner or staff),
+  // unlike the rest of this page which is shop identity/settings and stays
+  // owner-only. Used to be its own modal (MyProfileModal) — merged in here
+  // so there's a single "Profile" entry point app-wide instead of two.
+  const [myPendingImage, setMyPendingImage] = useState<string | null>(null);
+  const [mySaving, setMySaving] = useState(false);
+  const [myError, setMyError] = useState<string | null>(null);
+  const [myMessage, setMyMessage] = useState<string | null>(null);
 
-  const isOwner = role === "customer";
+  useEffect(() => {
+    if (!myMessage) return;
+    const t = setTimeout(() => setMyMessage(null), 3000);
+    return () => clearTimeout(t);
+  }, [myMessage]);
+
+  async function handleSaveMyPhoto() {
+    if (!shopId || !user) return;
+    setMySaving(true);
+    setMyError(null);
+    try {
+      let nextUrl = myProfileUrl ?? "";
+      if (myPendingImage) {
+        nextUrl = await uploadProductImage(myPendingImage);
+      }
+      await updateMyProfilePhoto(shopId, user.uid, nextUrl);
+      setMyProfileUrl(nextUrl);
+      setMyPendingImage(null);
+      setMyMessage("ບັນທຶກໂປຣໄຟລ໌ສ່ວນຕົວແລ້ວ");
+    } catch (err) {
+      setMyError(err instanceof Error ? err.message : "ບັນທຶກບໍ່ສຳເລັດ, ລອງໃໝ່");
+    } finally {
+      setMySaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!message) return;
@@ -114,48 +145,23 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
     return () => clearTimeout(t);
   }, [message]);
 
-  useEffect(() => {
-    if (!scMessage) return;
-    const t = setTimeout(() => setScMessage(null), 3000);
-    return () => clearTimeout(t);
-  }, [scMessage]);
-
   const load = useCallback(async () => {
     if (!shopId) return;
     setLoading(true);
     setError(null);
     try {
-      const [profile, sc] = await Promise.all([getShopProfile(shopId), getServiceChargeSettings(shopId)]);
+      const profile = await getShopProfile(shopId);
       setShop(profile);
       setName(profile.name);
       setProfileUrl(profile.profileUrl ?? "");
       setPendingImage(null);
       setIsEditing(false);
-      setScEnabled(sc.enabled);
-      setScPercent(String(sc.percent));
     } catch (err) {
       setError(err instanceof Error ? err.message : "ບໍ່ສາມາດໂຫຼດໂປຣໄຟລ໌ຮ້ານໄດ້");
     } finally {
       setLoading(false);
     }
   }, [shopId]);
-
-  async function handleSaveServiceCharge() {
-    if (!shopId) return;
-    setScSaving(true);
-    setScMessage(null);
-    try {
-      const percent = Math.max(0, parseFloat(scPercent) || 0);
-      await setServiceChargeSettings(shopId, { enabled: scEnabled, percent });
-      setScMessageError(false);
-      setScMessage("ບັນທຶກຄ່າບໍລິການແລ້ວ");
-    } catch {
-      setScMessageError(true);
-      setScMessage("ບັນທຶກບໍ່ສຳເລັດ, ລອງໃໝ່");
-    } finally {
-      setScSaving(false);
-    }
-  }
 
   useIonViewWillEnter(() => { load(); }, [load]);
 
@@ -264,8 +270,15 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonMenuButton autoHide={false} />
+            {view !== "menu" && (
+              <IonButton onClick={() => setView("menu")}>
+                <IonIcon slot="icon-only" icon={chevronBackOutline} />
+              </IonButton>
+            )}
           </IonButtons>
-          <IonTitle style={{ fontWeight: 700 }}>ໂປຣໄຟລ໌ຮ້ານ</IonTitle>
+          <IonTitle style={{ fontWeight: 700 }}>
+            {view === "menu" ? "ໂປຣໄຟລ໌" : view === "shop" ? "ໂປຣໄຟລ໌ຮ້ານ" : "ໂປຣໄຟລ໌ສ່ວນຕົວ"}
+          </IonTitle>
         </IonToolbar>
       </IonHeader>
 
@@ -275,14 +288,94 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
             <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
               <IonSpinner name="crescent" color="primary" />
             </div>
-          ) : !isOwner ? (
-            <div style={{ ...cardStyle, textAlign: "center", padding: "42px 24px" }}>
-              <IonIcon icon={businessOutline} style={{ fontSize: 48, color: "var(--ion-color-primary)" }} />
-              <h2 style={{ margin: "12px 0 6px", fontSize: "1.2rem" }}>ສຳລັບເຈົ້າຂອງຮ້ານ</h2>
-              <IonText color="medium">
-                <p style={{ margin: 0 }}>staff ບໍ່ສາມາດແກ້ໄຂໂປຣໄຟລ໌ຮ້ານໄດ້</p>
-              </IonText>
-            </div>
+          ) : view === "menu" ? (
+            <>
+              <button
+                onClick={() => setView("shop")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 14, width: "100%", textAlign: "left",
+                  cursor: "pointer", ...cardStyle, padding: "16px",
+                }}
+              >
+                <div style={{
+                  width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                  background: "var(--app-accent-surface)", color: "var(--ion-color-primary)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  overflow: "hidden",
+                }}>
+                  {shop?.profileUrl ? (
+                    <img src={shop.profileUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <IonIcon icon={businessOutline} style={{ fontSize: 24 }} />
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontWeight: 800, fontSize: "1rem" }}>ໂປຣໄຟລ໌ຮ້ານ</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--app-text-secondary)" }}>
+                    ຊື່/ຮູບຮ້ານ, ຂໍ້ມູນສາຂາ, ອີເມວ — ໃຊ້ຮ່ວມກັນທຸກຄົນ
+                  </p>
+                </div>
+                <IonIcon icon={chevronForwardOutline} style={{ fontSize: 18, color: "var(--app-text-muted)", flexShrink: 0 }} />
+              </button>
+
+              <button
+                onClick={() => setView("personal")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 14, width: "100%", textAlign: "left",
+                  cursor: "pointer", ...cardStyle, padding: "16px",
+                }}
+              >
+                <div style={{
+                  width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                  background: "var(--app-accent-surface)", color: "var(--ion-color-primary)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  overflow: "hidden",
+                }}>
+                  {myProfileUrl ? (
+                    <img src={myProfileUrl} alt="" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <IonIcon icon={personCircleOutline} style={{ fontSize: 24 }} />
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontWeight: 800, fontSize: "1rem" }}>ໂປຣໄຟລ໌ສ່ວນຕົວ</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--app-text-secondary)" }}>
+                    ຮູບຂອງທ່ານເອງ ຄົນທີ່ login ຢູ່
+                  </p>
+                </div>
+                <IonIcon icon={chevronForwardOutline} style={{ fontSize: 18, color: "var(--app-text-muted)", flexShrink: 0 }} />
+              </button>
+            </>
+          ) : view === "personal" ? (
+            <>
+              <section style={cardStyle}>
+                <div style={{ marginTop: 0 }}>
+                  <ImagePicker
+                    currentUrl={myPendingImage ?? myProfileUrl ?? ""}
+                    onImage={setMyPendingImage}
+                    onRemove={() => { setMyPendingImage(null); setMyProfileUrl(""); }}
+                    uploading={mySaving && !!myPendingImage}
+                  />
+                </div>
+                {myError && (
+                  <div style={{ marginTop: 10, color: "var(--app-danger)", fontWeight: 700, fontSize: "0.82rem" }}>
+                    {myError}
+                  </div>
+                )}
+                {myMessage && (
+                  <div style={{ marginTop: 10, color: "var(--app-success)", fontWeight: 700, fontSize: "0.82rem" }}>
+                    {myMessage}
+                  </div>
+                )}
+                <IonButton
+                  expand="block" size="small" disabled={mySaving}
+                  onClick={handleSaveMyPhoto}
+                  style={{ marginTop: 12, "--border-radius": "10px" }}
+                >
+                  {mySaving ? <IonSpinner name="dots" style={{ width: 18, height: 18 }} /> : "ບັນທຶກໂປຣໄຟລ໌ສ່ວນຕົວ"}
+                </IonButton>
+              </section>
+            </>
           ) : (
             <>
               {/* Profile card — always shows saved data */}
@@ -340,6 +433,9 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
                   </div>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginTop: 12 }}>
                     <div>
+                      <p style={{ margin: "0 0 2px", fontSize: "0.68rem", fontWeight: 700, color: "var(--ion-color-primary)", letterSpacing: 0.5 }}>
+                        ຮ້ານ
+                      </p>
                       <h1 style={{ margin: "0 0 4px", fontSize: "1.45rem", color: "var(--ion-text-color)" }}>
                         {shop?.name ?? "Minny ONE"}
                       </h1>
@@ -359,58 +455,51 @@ const ShopProfileSettings: React.FC<Props> = ({ onShopUpdated }) => {
                 </div>
               </div>
 
-              {/* Service charge */}
-              <section style={cardStyle}>
-                <SectionHeading icon={receiptOutline} label="ຄ່າບໍລິການ" />
-                <p style={{ margin: "8px 0 12px", fontSize: "0.8rem", color: "var(--app-text-secondary)", marginLeft: 34 }}>
-                  ເປີດໃຊ້ ແລ້ວຕັ້ງເປີເຊັນ, ຈາກນັ້ນເລືອກວ່າໂຕະໃດຄິດຄ່າບໍລິການຢູ່ໜ້າ "ຈັດການໂຕະ"
-                </p>
-                <div
-                  onClick={() => setScEnabled((v) => !v)}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer",
-                    padding: "10px 12px", borderRadius: 10,
-                    background: scEnabled ? "var(--app-accent-surface)" : "var(--ion-color-step-50, #f5f5f4)",
-                  }}
-                >
-                  <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--ion-text-color)" }}>
-                    {scEnabled ? `ໃຊ້ງານ / ${scPercent}%` : "ປິດໃຊ້ງານ"}
-                  </span>
-                  <div style={{
-                    width: 46, height: 26, borderRadius: 13, flexShrink: 0,
-                    background: scEnabled ? "var(--ion-color-primary)" : "var(--ion-color-step-200, #d4d4d0)",
-                    position: "relative", transition: "background 0.15s",
-                  }}>
-                    <div style={{
-                      position: "absolute", top: 2, left: scEnabled ? 22 : 2,
-                      width: 22, height: 22, borderRadius: "50%", background: "var(--app-surface)",
-                      boxShadow: "0 1px 3px rgba(0,0,0,0.3)", transition: "left 0.15s",
-                    }} />
+              {/* Branch info — same owner's other shops, pulled from
+                  availableShops (see AuthContext.tsx: users/{uid}.shopIds),
+                  the same list ShopPicker/AllShopsDashboard already use. */}
+              {availableShops.length > 1 && (
+                <section style={cardStyle}>
+                  <SectionHeading icon={businessOutline} label="ຂໍ້ມູນສາຂາ" />
+                  <p style={{ margin: "8px 0 12px", fontSize: "0.8rem", color: "var(--app-text-secondary)", marginLeft: 34 }}>
+                    ທຸກສາຂາທີ່ຢູ່ພາຍໃຕ້ບັນຊີດຽວກັນ — ກົດເພື່ອສະຫຼັບໄປສາຂານັ້ນ
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {availableShops.map((s) => {
+                      const isCurrent = s.id === shopId;
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => !isCurrent && switchShop(s.id)}
+                          disabled={isCurrent}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 12,
+                            border: `1.5px solid ${isCurrent ? "var(--ion-color-primary)" : "var(--app-border)"}`,
+                            background: isCurrent ? "var(--app-accent-surface)" : "var(--app-surface)",
+                            cursor: isCurrent ? "default" : "pointer", textAlign: "left", width: "100%",
+                          }}
+                        >
+                          <div style={{
+                            width: 40, height: 40, borderRadius: 10, overflow: "hidden", flexShrink: 0,
+                            background: "var(--app-accent-surface)", color: "var(--ion-color-primary)",
+                            display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
+                          }}>
+                            {s.profileUrl ? (
+                              <img src={s.profileUrl} alt={s.name} loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            ) : (
+                              s.name.slice(0, 1).toUpperCase()
+                            )}
+                          </div>
+                          <span style={{ fontWeight: 700, fontSize: "0.9rem", flex: 1, minWidth: 0 }}>{s.name}</span>
+                          {isCurrent && (
+                            <span style={{ fontSize: "0.68rem", fontWeight: 800, color: "var(--ion-color-primary)", flexShrink: 0 }}>ກຳລັງໃຊ້ຢູ່</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
-                {scEnabled && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-                    <IonInput
-                      type="number" min="0" max="100" value={scPercent}
-                      onIonInput={(e) => setScPercent(e.detail.value ?? "0")}
-                      fill="outline" style={{ "--border-radius": "12px", flex: 1 }}
-                    />
-                    <span style={{ fontWeight: 700, color: "var(--app-text-secondary)" }}>%</span>
-                  </div>
-                )}
-                {scMessage && (
-                  <div style={{ marginTop: 10, fontWeight: 700, fontSize: "0.82rem", color: scMessageError ? "var(--app-danger)" : "var(--app-success)" }}>
-                    {scMessage}
-                  </div>
-                )}
-                <IonButton
-                  expand="block" size="small" disabled={scSaving}
-                  onClick={handleSaveServiceCharge}
-                  style={{ marginTop: 12, "--border-radius": "10px" }}
-                >
-                  {scSaving ? <IonSpinner name="dots" style={{ width: 18, height: 18 }} /> : "ບັນທຶກຄ່າບໍລິການ"}
-                </IonButton>
-              </section>
+                </section>
+              )}
 
               {tenant && (
                 <div style={{ ...cardStyle, padding: "14px 16px" }}>

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { menuController } from "@ionic/core";
 import {
   IonBadge,
   IonContent,
@@ -13,6 +14,8 @@ import {
   IonModal,
   IonRouterOutlet,
   IonSpinner,
+  IonTabBar,
+  IonTabButton,
   IonTabs,
   IonTitle,
   IonToolbar,
@@ -36,20 +39,32 @@ import {
   cashOutline,
   gridOutline,
   mapOutline,
+  addCircleOutline,
+  beakerOutline,
+  pricetagOutline,
+  layersOutline,
   chevronDownOutline,
+  resizeOutline,
+  idCardOutline,
+  menuOutline,
+  trashOutline,
+  cubeOutline,
 } from "ionicons/icons";
 import { CartProvider } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { getProducts } from "../data/productRepository";
-import MyProfileModal from "../components/MyProfileModal";
 
 const Sell = lazy(() => import("./Sell"));
 const Products = lazy(() => import("./Products"));
+const Stock = lazy(() => import("./Stock"));
 const Summary = lazy(() => import("./Summary"));
 const Finance = lazy(() => import("./Finance"));
 const SalesHistory = lazy(() => import("./SalesHistory"));
+const CancelBill = lazy(() => import("./CancelBill"));
+const CancelledBillHistory = lazy(() => import("./CancelledBillHistory"));
 const ShopProfileSettings = lazy(() => import("./ShopProfileSettings"));
 const StaffSettings = lazy(() => import("./StaffSettings"));
+const StaffForm = lazy(() => import("./StaffForm"));
 const TakeOrder = lazy(() => import("./TakeOrder"));
 const Kitchen = lazy(() => import("./Kitchen"));
 const Expedite = lazy(() => import("./Expedite"));
@@ -58,6 +73,22 @@ const ManageTables = lazy(() => import("./ManageTables"));
 const ManageZones = lazy(() => import("./ManageZones"));
 const TableForm = lazy(() => import("./TableForm"));
 const CreateZone = lazy(() => import("./CreateZone"));
+const ManageToppings = lazy(() => import("./ManageToppings"));
+const CreateTopping = lazy(() => import("./CreateTopping"));
+const ManageUnits = lazy(() => import("./ManageUnits"));
+const CreateUnit = lazy(() => import("./CreateUnit"));
+const ManageCategories = lazy(() => import("./ManageCategories"));
+const CreateCategory = lazy(() => import("./CreateCategory"));
+const ManageFoodGroups = lazy(() => import("./ManageFoodGroups"));
+const CreateFoodGroup = lazy(() => import("./CreateFoodGroup"));
+const ManageSizes = lazy(() => import("./ManageSizes"));
+const CreateSize = lazy(() => import("./CreateSize"));
+const ManageExchangeRates = lazy(() => import("./ManageExchangeRates"));
+const CreateExchangeRate = lazy(() => import("./CreateExchangeRate"));
+const ManageCustomers = lazy(() => import("./ManageCustomers"));
+const CustomerForm = lazy(() => import("./CustomerForm"));
+const UserPermissions = lazy(() => import("./UserPermissions"));
+const ServiceChargeSettings = lazy(() => import("./ServiceChargeSettings"));
 
 function RouteFallback() {
   return (
@@ -94,9 +125,9 @@ const MainTabs: React.FC = () => {
   const canViewFinance = role === "customer" || permissions.canViewFinance;
   const { count: alertCount, refresh: refreshAlerts } = useStockAlertCount(shopId);
   const [showExpiryAlert, setShowExpiryAlert] = useState(false);
-  const [myProfileOpen, setMyProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [salesOpen, setSalesOpen] = useState(false);
+  const [cancelOrdersOpen, setCancelOrdersOpen] = useState(false);
 
   useEffect(() => {
     if (tenant && !tenant.isExpired && tenant.daysLeft !== null && tenant.daysLeft <= 7) {
@@ -127,6 +158,14 @@ const MainTabs: React.FC = () => {
     import("./ManageZones");
     import("./TableForm");
     import("./CreateZone");
+    import("./ManageToppings");
+    import("./CreateTopping");
+    import("./ManageUnits");
+    import("./CreateUnit");
+    import("./ManageCategories");
+    import("./CreateCategory");
+    import("./ManageFoodGroups");
+    import("./CreateFoodGroup");
   }, []);
 
   return (
@@ -187,6 +226,14 @@ const MainTabs: React.FC = () => {
                     <IonLabel style={{ fontWeight: 600 }}>ຂາຍ (ໜ້າບາໂຊ/ຊື້ກັບ)</IonLabel>
                   </IonItem>
                 </IonMenuToggle>
+                {permissions.canTakeOrders && (
+                  <IonMenuToggle autoHide={false}>
+                    <IonItem button detail={false} routerLink="/tabs/check-bill" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                      <IonIcon slot="start" icon={cashOutline} color="primary" />
+                      <IonLabel style={{ fontWeight: 600 }}>ເຊັກບິນ</IonLabel>
+                    </IonItem>
+                  </IonMenuToggle>
+                )}
               </IonList>
 
               {permissions.canTakeOrders && (
@@ -216,15 +263,46 @@ const MainTabs: React.FC = () => {
                         </IonItem>
                       </IonMenuToggle>
                       <IonMenuToggle autoHide={false}>
-                        <IonItem button detail={false} routerLink="/tabs/check-bill" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                          <IonIcon slot="start" icon={cashOutline} color="primary" />
-                          <IonLabel style={{ fontWeight: 600 }}>ເຊັກບິນ</IonLabel>
-                        </IonItem>
-                      </IonMenuToggle>
-                      <IonMenuToggle autoHide={false}>
                         <IonItem button detail={false} routerLink="/tabs/history" style={{ "--background-hover": "var(--app-accent-surface)" }}>
                           <IonIcon slot="start" icon={timeOutline} color="primary" />
                           <IonLabel style={{ fontWeight: 600 }}>ປະຫວັດການຂາຍ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                    </IonList>
+                  )}
+                </>
+              )}
+
+              {permissions.canDeleteSales && (
+                <>
+                  <button
+                    onClick={() => setCancelOrdersOpen((v) => !v)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      width: "100%", padding: "12px 18px 6px", background: "none", border: "none", cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>ຈັດການອໍເດີ້</span>
+                    <IonIcon
+                      icon={chevronDownOutline}
+                      style={{
+                        fontSize: "0.85rem", color: "var(--app-text-muted)",
+                        transform: cancelOrdersOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s",
+                      }}
+                    />
+                  </button>
+                  {cancelOrdersOpen && (
+                    <IonList lines="none">
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/cancel-bill" style={{ "--background-hover": "rgba(220,38,38,0.1)" }}>
+                          <IonIcon slot="start" icon={trashOutline} color="danger" />
+                          <IonLabel style={{ fontWeight: 600 }}>ຍົກເລີກບິນ</IonLabel>
+                        </IonItem>
+                      </IonMenuToggle>
+                      <IonMenuToggle autoHide={false}>
+                        <IonItem button detail={false} routerLink="/tabs/cancelled-bill-history" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={timeOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ປະຫວັດການຍົກເລີກບິນ</IonLabel>
                         </IonItem>
                       </IonMenuToggle>
                     </IonList>
@@ -258,7 +336,7 @@ const MainTabs: React.FC = () => {
                 </>
               )}
 
-              {permissions.canTakeOrders && (
+              {(permissions.canTakeOrders || permissions.canManageProducts) && (
                 <>
                   <button
                     onClick={() => setSettingsOpen((v) => !v)}
@@ -278,18 +356,92 @@ const MainTabs: React.FC = () => {
                   </button>
                   {settingsOpen && (
                     <IonList lines="none">
+                      {permissions.canTakeOrders && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-tables" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={gridOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການໂຕະ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canTakeOrders && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-zones" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={mapOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການໂຊນ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canTakeOrders && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-exchange-rates" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={swapHorizontalOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ອັດຕາແລກປ່ຽນ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canTakeOrders && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/service-charge" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={receiptOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຄ່າບໍລິການ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canManageProducts && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-toppings" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={addCircleOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການທັອບປິ້ງ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canManageProducts && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-units" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={beakerOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການຫົວໜ່ວຍ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canManageProducts && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-categories" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={pricetagOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການໝວດໝູ່</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canManageProducts && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-food-groups" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={layersOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການກຸ່ມອາຫານ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canManageProducts && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-sizes" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={resizeOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການຂະໜາດ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
                       <IonMenuToggle autoHide={false}>
-                        <IonItem button detail={false} routerLink="/tabs/manage-tables" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                          <IonIcon slot="start" icon={gridOutline} color="primary" />
-                          <IonLabel style={{ fontWeight: 600 }}>ຈັດການໂຕະ</IonLabel>
+                        <IonItem button detail={false} routerLink="/tabs/manage-customers" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                          <IonIcon slot="start" icon={idCardOutline} color="primary" />
+                          <IonLabel style={{ fontWeight: 600 }}>ຂໍ້ມູນລູກຄ້າ</IonLabel>
                         </IonItem>
                       </IonMenuToggle>
-                      <IonMenuToggle autoHide={false}>
-                        <IonItem button detail={false} routerLink="/tabs/manage-zones" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                          <IonIcon slot="start" icon={mapOutline} color="primary" />
-                          <IonLabel style={{ fontWeight: 600 }}>ຈັດການໂຊນ</IonLabel>
-                        </IonItem>
-                      </IonMenuToggle>
+                      {role === "customer" && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/staff" style={{ "--background-hover": "rgba(15,118,110,0.1)" }}>
+                            <IonIcon slot="start" icon={peopleOutline} style={{ color: "#0f766e" }} />
+                            <IonLabel style={{ fontWeight: 600 }}>ຂໍ້ມູນຜູ້ໃຊ້</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
                     </IonList>
                   )}
                 </>
@@ -322,36 +474,14 @@ const MainTabs: React.FC = () => {
                 )}
               </IonList>
 
-              {role === "customer" && (
-                <>
-                  <div style={{ padding: "12px 18px 6px", fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>
-                    ຈັດການຮ້ານ
-                  </div>
-                  <IonList lines="none">
-                    <IonMenuToggle autoHide={false}>
-                      <IonItem button detail={false} routerLink="/tabs/shop-profile" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                        <IonIcon slot="start" icon={businessOutline} color="primary" />
-                        <IonLabel style={{ fontWeight: 600 }}>ໂປຣໄຟລ໌ຮ້ານ</IonLabel>
-                      </IonItem>
-                    </IonMenuToggle>
-                    <IonMenuToggle autoHide={false}>
-                      <IonItem button detail={false} routerLink="/tabs/staff" style={{ "--background-hover": "rgba(15,118,110,0.1)" }}>
-                        <IonIcon slot="start" icon={peopleOutline} style={{ color: "#0f766e" }} />
-                        <IonLabel style={{ fontWeight: 600 }}>ພະນັກງານ</IonLabel>
-                      </IonItem>
-                    </IonMenuToggle>
-                  </IonList>
-                </>
-              )}
-
               <div style={{ padding: "14px 18px 6px", fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>
                 ບັນຊີ
               </div>
               <IonList lines="none">
                 <IonMenuToggle autoHide={false}>
-                  <IonItem button detail={false} onClick={() => setMyProfileOpen(true)} style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                  <IonItem button detail={false} routerLink="/tabs/shop-profile" style={{ "--background-hover": "var(--app-accent-surface)" }}>
                     <IonIcon slot="start" icon={personCircleOutline} color="primary" />
-                    <IonLabel style={{ fontWeight: 600 }}>ໂປຣໄຟລ໌ຂ້ອຍ</IonLabel>
+                    <IonLabel style={{ fontWeight: 600 }}>ໂປຣໄຟລ໌</IonLabel>
                   </IonItem>
                 </IonMenuToggle>
                 {availableShops.length > 1 && (
@@ -383,7 +513,194 @@ const MainTabs: React.FC = () => {
         </IonFooter>
       </IonMenu>
 
-      <MyProfileModal isOpen={myProfileOpen} onDismiss={() => setMyProfileOpen(false)} />
+      <IonTabs>
+        <IonRouterOutlet id="main-content">
+          <Route exact path="/tabs/sell">
+            <Suspense fallback={<RouteFallback />}><Sell /></Suspense>
+          </Route>
+          <Route exact path="/tabs/products">
+            <Suspense fallback={<RouteFallback />}><Products onStockChanged={refreshAlerts} /></Suspense>
+          </Route>
+          <Route exact path="/tabs/summary">
+            <Suspense fallback={<RouteFallback />}><Summary /></Suspense>
+          </Route>
+          <Route exact path="/tabs/finance">
+            <Suspense fallback={<RouteFallback />}><Finance /></Suspense>
+          </Route>
+          <Route exact path="/tabs/manage-customers">
+            <Suspense fallback={<RouteFallback />}><ManageCustomers /></Suspense>
+          </Route>
+          <Route exact path="/tabs/customer-form/:phone?">
+            <Suspense fallback={<RouteFallback />}><CustomerForm /></Suspense>
+          </Route>
+          <Route exact path="/tabs/history">
+            <Suspense fallback={<RouteFallback />}><SalesHistory /></Suspense>
+          </Route>
+          {permissions.canDeleteSales && (
+            <Route exact path="/tabs/cancel-bill">
+              <Suspense fallback={<RouteFallback />}><CancelBill /></Suspense>
+            </Route>
+          )}
+          {permissions.canDeleteSales && (
+            <Route exact path="/tabs/cancelled-bill-history">
+              <Suspense fallback={<RouteFallback />}><CancelledBillHistory /></Suspense>
+            </Route>
+          )}
+          <Route exact path="/tabs/shop-profile">
+            <Suspense fallback={<RouteFallback />}><ShopProfileSettings onShopUpdated={setShopProfile} /></Suspense>
+          </Route>
+          <Route exact path="/tabs/staff">
+            <Suspense fallback={<RouteFallback />}><StaffSettings /></Suspense>
+          </Route>
+          <Route exact path="/tabs/staff-form/:uid?">
+            <Suspense fallback={<RouteFallback />}><StaffForm /></Suspense>
+          </Route>
+          <Route exact path="/tabs/user-permissions/:uid">
+            <Suspense fallback={<RouteFallback />}><UserPermissions /></Suspense>
+          </Route>
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/take-order">
+              <Suspense fallback={<RouteFallback />}><TakeOrder /></Suspense>
+            </Route>
+          )}
+          {permissions.canCook && (
+            <Route exact path="/tabs/kitchen">
+              <Suspense fallback={<RouteFallback />}><Kitchen /></Suspense>
+            </Route>
+          )}
+          {permissions.canExpedite && (
+            <Route exact path="/tabs/expedite">
+              <Suspense fallback={<RouteFallback />}><Expedite /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/check-bill">
+              <Suspense fallback={<RouteFallback />}><CheckBill /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/manage-tables">
+              <Suspense fallback={<RouteFallback />}><ManageTables /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/manage-zones">
+              <Suspense fallback={<RouteFallback />}><ManageZones /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/create-table/:key?">
+              <Suspense fallback={<RouteFallback />}><TableForm /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/create-zone">
+              <Suspense fallback={<RouteFallback />}><CreateZone /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/manage-toppings">
+              <Suspense fallback={<RouteFallback />}><ManageToppings /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/create-topping">
+              <Suspense fallback={<RouteFallback />}><CreateTopping /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/manage-units">
+              <Suspense fallback={<RouteFallback />}><ManageUnits /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/create-unit">
+              <Suspense fallback={<RouteFallback />}><CreateUnit /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/manage-categories">
+              <Suspense fallback={<RouteFallback />}><ManageCategories /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/create-category">
+              <Suspense fallback={<RouteFallback />}><CreateCategory /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/manage-food-groups">
+              <Suspense fallback={<RouteFallback />}><ManageFoodGroups /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/create-food-group">
+              <Suspense fallback={<RouteFallback />}><CreateFoodGroup /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/manage-sizes">
+              <Suspense fallback={<RouteFallback />}><ManageSizes /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/create-size">
+              <Suspense fallback={<RouteFallback />}><CreateSize /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/manage-exchange-rates">
+              <Suspense fallback={<RouteFallback />}><ManageExchangeRates /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/service-charge">
+              <Suspense fallback={<RouteFallback />}><ServiceChargeSettings /></Suspense>
+            </Route>
+          )}
+          {permissions.canTakeOrders && (
+            <Route exact path="/tabs/create-exchange-rate">
+              <Suspense fallback={<RouteFallback />}><CreateExchangeRate /></Suspense>
+            </Route>
+          )}
+          <Route exact path="/tabs">
+            <Redirect to={permissions.canTakeOrders ? "/tabs/take-order" : "/tabs/products"} />
+          </Route>
+        </IonRouterOutlet>
+
+        {/* Mobile/tablet only (see .footer-tab-bar CSS below) — desktop
+            navigates entirely through the sidebar, same as before this was
+            added back. Icons/labels/routes mirror the sidebar exactly so
+            there's one consistent set of names, not two. */}
+        <IonTabBar slot="bottom" className="footer-tab-bar">
+          {permissions.canTakeOrders && (
+            <IonTabButton tab="take-order" href="/tabs/take-order">
+              <IonIcon icon={receiptOutline} />
+              <IonLabel>ອໍເດີ້</IonLabel>
+            </IonTabButton>
+          )}
+          {permissions.canTakeOrders && (
+            <IonTabButton tab="check-bill" href="/tabs/check-bill">
+              <IonIcon icon={cashOutline} />
+              <IonLabel>ເຊັກບິນ</IonLabel>
+            </IonTabButton>
+          )}
+          {permissions.canCook && (
+            <IonTabButton tab="kitchen" href="/tabs/kitchen">
+              <IonIcon icon={flameOutline} />
+              <IonLabel>ຫ້ອງຄົວ</IonLabel>
+            </IonTabButton>
+          )}
+          <IonTabButton tab="products" href="/tabs/products">
+            <IonIcon icon={restaurantOutline} />
+            <IonLabel>ເມນູ</IonLabel>
+          </IonTabButton>
+          <IonTabButton tab="more" onClick={() => menuController.open()}>
+            <IonIcon icon={menuOutline} />
+            <IonLabel>ເພີ່ມ</IonLabel>
+          </IonTabButton>
+        </IonTabBar>
+      </IonTabs>
 
       <IonModal
         isOpen={showExpiryAlert}
@@ -444,74 +761,12 @@ const MainTabs: React.FC = () => {
         </div>
       </IonModal>
 
-      <IonTabs>
-        <IonRouterOutlet id="main-content">
-          <Route exact path="/tabs/sell">
-            <Suspense fallback={<RouteFallback />}><Sell /></Suspense>
-          </Route>
-          <Route exact path="/tabs/products">
-            <Suspense fallback={<RouteFallback />}><Products onStockChanged={refreshAlerts} /></Suspense>
-          </Route>
-          <Route exact path="/tabs/summary">
-            <Suspense fallback={<RouteFallback />}><Summary /></Suspense>
-          </Route>
-          <Route exact path="/tabs/finance">
-            <Suspense fallback={<RouteFallback />}><Finance /></Suspense>
-          </Route>
-          <Route exact path="/tabs/history">
-            <Suspense fallback={<RouteFallback />}><SalesHistory /></Suspense>
-          </Route>
-          <Route exact path="/tabs/shop-profile">
-            <Suspense fallback={<RouteFallback />}><ShopProfileSettings onShopUpdated={setShopProfile} /></Suspense>
-          </Route>
-          <Route exact path="/tabs/staff">
-            <Suspense fallback={<RouteFallback />}><StaffSettings /></Suspense>
-          </Route>
-          {permissions.canTakeOrders && (
-            <Route exact path="/tabs/take-order">
-              <Suspense fallback={<RouteFallback />}><TakeOrder /></Suspense>
-            </Route>
-          )}
-          {permissions.canCook && (
-            <Route exact path="/tabs/kitchen">
-              <Suspense fallback={<RouteFallback />}><Kitchen /></Suspense>
-            </Route>
-          )}
-          {permissions.canExpedite && (
-            <Route exact path="/tabs/expedite">
-              <Suspense fallback={<RouteFallback />}><Expedite /></Suspense>
-            </Route>
-          )}
-          {permissions.canTakeOrders && (
-            <Route exact path="/tabs/check-bill">
-              <Suspense fallback={<RouteFallback />}><CheckBill /></Suspense>
-            </Route>
-          )}
-          {permissions.canTakeOrders && (
-            <Route exact path="/tabs/manage-tables">
-              <Suspense fallback={<RouteFallback />}><ManageTables /></Suspense>
-            </Route>
-          )}
-          {permissions.canTakeOrders && (
-            <Route exact path="/tabs/manage-zones">
-              <Suspense fallback={<RouteFallback />}><ManageZones /></Suspense>
-            </Route>
-          )}
-          {permissions.canTakeOrders && (
-            <Route exact path="/tabs/create-table/:key?">
-              <Suspense fallback={<RouteFallback />}><TableForm /></Suspense>
-            </Route>
-          )}
-          {permissions.canTakeOrders && (
-            <Route exact path="/tabs/create-zone">
-              <Suspense fallback={<RouteFallback />}><CreateZone /></Suspense>
-            </Route>
-          )}
-          <Route exact path="/tabs">
-            <Redirect to={permissions.canTakeOrders ? "/tabs/take-order" : "/tabs/products"} />
-          </Route>
-        </IonRouterOutlet>
-      </IonTabs>
+      <style>{`
+        .footer-tab-bar { display: none; }
+        @media (max-width: 1024px) {
+          .footer-tab-bar { display: flex; }
+        }
+      `}</style>
     </CartProvider>
   );
 };

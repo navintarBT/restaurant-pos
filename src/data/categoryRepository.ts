@@ -1,5 +1,5 @@
 import {
-  collection, doc, addDoc, updateDoc, deleteDoc,
+  collection, doc, addDoc, updateDoc, deleteDoc, deleteField,
   getDocs, orderBy, query, where, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -16,16 +16,41 @@ function categoriesCol(shopId: string) {
 export async function getCategories(shopId: string): Promise<Category[]> {
   const q = query(categoriesCol(shopId), orderBy("name"));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, name: d.data().name as string }));
+  return snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      name: data.name as string,
+      foodGroup: data.foodGroup as string | undefined,
+      icon: data.icon as string | undefined,
+    };
+  });
 }
 
-export async function addCategory(shopId: string, name: string): Promise<string> {
-  const ref = await addDoc(categoriesCol(shopId), { name });
+export async function addCategory(shopId: string, name: string, foodGroup?: string, icon?: string): Promise<string> {
+  // Firestore rejects `undefined` field values outright — only include
+  // foodGroup/icon in the write when they actually have a value.
+  const payload: { name: string; foodGroup?: string; icon?: string } = { name };
+  if (foodGroup) payload.foodGroup = foodGroup;
+  if (icon) payload.icon = icon;
+  const ref = await addDoc(categoriesCol(shopId), payload);
   return ref.id;
 }
 
 export async function updateCategory(shopId: string, id: string, name: string): Promise<void> {
   await updateDoc(doc(categoriesCol(shopId), id), { name });
+}
+
+/** Reassigns (or clears, when foodGroup is undefined) which food group this
+ * category belongs to — separate from renaming, since they're independent
+ * edits in the UI. */
+export async function setCategoryFoodGroup(shopId: string, id: string, foodGroup: string | undefined): Promise<void> {
+  await updateDoc(doc(categoriesCol(shopId), id), { foodGroup: foodGroup ? foodGroup : deleteField() });
+}
+
+/** Sets (or clears, when icon is undefined/empty) this category's icon. */
+export async function setCategoryIcon(shopId: string, id: string, icon: string | undefined): Promise<void> {
+  await updateDoc(doc(categoriesCol(shopId), id), { icon: icon ? icon : deleteField() });
 }
 
 export async function deleteCategory(shopId: string, id: string): Promise<void> {

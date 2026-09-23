@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -10,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { db, auth } from "../firebase";
-import type { ShopProfile, ShopUser, StaffPermissions } from "./types";
+import type { ShopProfile, ShopUser, StaffPermissions, StaffRole } from "./types";
 
 function shopDoc(shopId: string) {
   return doc(db, "shops", shopId);
@@ -127,6 +128,115 @@ export async function setServiceChargeSettings(shopId: string, settings: Service
   });
 }
 
+export interface ToppingEntry {
+  name: string;
+  // Extra charge for this topping, in kip. Undefined/0 = free add-on.
+  price?: number;
+}
+
+/** Shop-wide topping/add-on options (e.g. extra shot, lemon, mint) staff can
+ * offer alongside a menu item. Menu-configuration, so lives beside products
+ * rather than table roster/zones. */
+export async function getToppings(shopId: string): Promise<ToppingEntry[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.toppings as ToppingEntry[] | undefined) ?? [];
+}
+
+export async function setToppings(shopId: string, toppings: ToppingEntry[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    toppings,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Serving units (e.g. ["ຕຸກ","ຈອກ","ແກ້ວ"]) — how a menu item is measured or
+ * sold. Menu-configuration, gated the same as toppings. */
+export async function getUnits(shopId: string): Promise<string[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.units as string[] | undefined) ?? [];
+}
+
+export async function setUnits(shopId: string, units: string[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    units,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Food groups (e.g. ["ກຸ່ມເຄື່ອງດື່ມ","ກຸ່ມອາຫານ"]) — one level above
+ * `categories` (shops/{shopId}/categories): each category can optionally be
+ * tagged with the food group it belongs to (Category.foodGroup). */
+export async function getFoodGroups(shopId: string): Promise<string[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.foodGroups as string[] | undefined) ?? [];
+}
+
+export async function setFoodGroups(shopId: string, foodGroups: string[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    foodGroups,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Portion/size options (e.g. ["ນ້ອຍ","ກາງ","ໃຫຍ່"]) — menu-configuration,
+ * gated the same as toppings/units/foodGroups. */
+export async function getSizes(shopId: string): Promise<string[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.sizes as string[] | undefined) ?? [];
+}
+
+export async function setSizes(shopId: string, sizes: string[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    sizes,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export type CurrencyCode = "LAK" | "THB" | "USD" | "CNY" | "JPY";
+
+export const CURRENCY_LABELS: Record<CurrencyCode, string> = {
+  LAK: "ລາວ (LAK)",
+  THB: "ໄທ (THB)",
+  USD: "ອາເມລິກາ (USD)",
+  CNY: "ຈີນ (CNY)",
+  JPY: "ຍີ່ປຸ່ນ (JPY)",
+};
+
+// Country flag shown next to each currency (ManageExchangeRates.tsx /
+// CreateExchangeRate.tsx) — flags aren't in the Tabler icon set (outline,
+// single-color icons can't represent multi-color flags), so these stay
+// plain emoji.
+export const CURRENCY_FLAGS: Record<CurrencyCode, string> = {
+  LAK: "🇱🇦",
+  THB: "🇹🇭",
+  USD: "🇺🇸",
+  CNY: "🇨🇳",
+  JPY: "🇯🇵",
+};
+
+export const ALL_CURRENCIES: CurrencyCode[] = ["LAK", "THB", "USD", "CNY", "JPY"];
+
+export interface ExchangeRate {
+  currency: CurrencyCode;
+  rate: number;
+  enabled: boolean;
+}
+
+/** Foreign-currency exchange rates the shop accepts alongside LAK at
+ * checkout. Money/checkout-related, so gated like serviceCharge (owner or
+ * canTakeOrders) rather than canManageProducts. */
+export async function getExchangeRates(shopId: string): Promise<ExchangeRate[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.exchangeRates as ExchangeRate[] | undefined) ?? [];
+}
+
+export async function setExchangeRates(shopId: string, rates: ExchangeRate[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    exchangeRates: rates,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function getShopUsers(shopId: string): Promise<ShopUser[]> {
   const snap = await getDocs(shopUsersCol(shopId));
   return snap.docs.map((d) => {
@@ -150,14 +260,20 @@ export async function getShopUsers(shopId: string): Promise<ShopUser[]> {
         canCook: p.canCook ?? false,
         canExpedite: p.canExpedite ?? false,
       } : undefined,
+      staffRole: data.staffRole as StaffRole | undefined,
+      zoneRestricted: data.zoneRestricted as boolean | undefined,
+      allowedZones: data.allowedZones as string[] | undefined,
     };
   }).sort((a, b) => `${a.role}-${a.email}`.localeCompare(`${b.role}-${b.email}`));
 }
 
 export async function createStaffUser(
   shopId: string,
-  data: { email: string; password: string; displayName?: string; permissions?: StaffPermissions },
-): Promise<void> {
+  data: {
+    email: string; password: string; displayName?: string; permissions?: StaffPermissions;
+    photoUrl?: string; staffRole?: StaffRole; zoneRestricted?: boolean; allowedZones?: string[];
+  },
+): Promise<string> {
   const email = data.email.trim().toLowerCase();
 
   // Create Firebase Auth user via REST API (doesn't affect current session)
@@ -191,22 +307,41 @@ export async function createStaffUser(
     canExpedite: false,
   };
 
+  // Firestore rejects `undefined` field values outright — only include the
+  // optional extras when they actually have a value.
+  const extra: Record<string, unknown> = {};
+  if (data.photoUrl) extra.profileUrl = data.photoUrl;
+  if (data.staffRole) extra.staffRole = data.staffRole;
+  if (data.zoneRestricted) {
+    extra.zoneRestricted = true;
+    if (data.allowedZones?.length) extra.allowedZones = data.allowedZones;
+  }
+
   const batch = writeBatch(db);
-  batch.set(doc(db, "users", uid), { role: "staff", shopId, email, displayName, createdAt: now, permissions });
-  batch.set(doc(db, "shops", shopId, "users", uid), { role: "staff", email, displayName, createdAt: now, permissions });
+  batch.set(doc(db, "users", uid), { role: "staff", shopId, email, displayName, createdAt: now, permissions, ...extra });
+  batch.set(doc(db, "shops", shopId, "users", uid), { role: "staff", email, displayName, createdAt: now, permissions, ...extra });
   await batch.commit();
+  return uid;
 }
 
 export async function updateStaffUser(
   shopId: string,
   uid: string,
-  data: { displayName: string },
+  data: { displayName: string; photoUrl?: string },
 ): Promise<void> {
   const displayName = data.displayName.trim();
   const now = serverTimestamp();
   const batch = writeBatch(db);
+  // The top-level users/{uid} doc only lets the owner touch `displayName`
+  // here (rules) — self-service profileUrl updates are a separate, owner-
+  // uid-scoped branch, so an owner setting ANOTHER staffer's photo can only
+  // land on the shop-scoped copy below (which is what the admin UI reads).
   batch.update(doc(db, "users", uid), { displayName, updatedAt: now });
-  batch.update(doc(db, "shops", shopId, "users", uid), { displayName, updatedAt: now });
+  batch.update(doc(db, "shops", shopId, "users", uid), {
+    displayName,
+    updatedAt: now,
+    ...(data.photoUrl !== undefined ? { profileUrl: data.photoUrl } : {}),
+  });
   await batch.commit();
 }
 
@@ -228,7 +363,7 @@ export async function updateMyProfilePhoto(
 export async function updateStaffEmail(
   shopId: string,
   oldUid: string,
-  data: { newEmail: string; displayName: string; createdAt?: Date },
+  data: { newEmail: string; displayName: string; createdAt?: Date; photoUrl?: string },
 ): Promise<string> {
   const newEmail = data.newEmail.trim().toLowerCase();
 
@@ -254,6 +389,7 @@ export async function updateStaffEmail(
   const newUid: string = json.localId;
 
   const now = serverTimestamp();
+  const photoExtra = data.photoUrl ? { profileUrl: data.photoUrl } : {};
   const batch = writeBatch(db);
   batch.set(doc(db, "users", newUid), {
     role: "staff", shopId,
@@ -261,6 +397,7 @@ export async function updateStaffEmail(
     displayName: data.displayName,
     createdAt: data.createdAt ? Timestamp.fromDate(data.createdAt) : now,
     updatedAt: now,
+    ...photoExtra,
   });
   batch.set(doc(db, "shops", shopId, "users", newUid), {
     role: "staff",
@@ -268,6 +405,7 @@ export async function updateStaffEmail(
     displayName: data.displayName,
     createdAt: data.createdAt ? Timestamp.fromDate(data.createdAt) : now,
     updatedAt: now,
+    ...photoExtra,
   });
   batch.delete(doc(db, "users", oldUid));
   batch.delete(doc(db, "shops", shopId, "users", oldUid));
@@ -346,9 +484,19 @@ export async function deleteStaffUser(shopId: string, uid: string): Promise<void
 export async function updateStaffPermissions(
   shopId: string,
   uid: string,
-  permissions: StaffPermissions,
+  data: {
+    permissions: StaffPermissions;
+    staffRole?: StaffRole;
+    zoneRestricted?: boolean;
+    allowedZones?: string[];
+  },
 ): Promise<void> {
   // Write only to the shop's subcollection — owner has write access here.
   // users/{uid} is protected so only the user themselves can update it.
-  await updateDoc(doc(db, "shops", shopId, "users", uid), { permissions });
+  await updateDoc(doc(db, "shops", shopId, "users", uid), {
+    permissions: data.permissions,
+    staffRole: data.staffRole ? data.staffRole : deleteField(),
+    zoneRestricted: !!data.zoneRestricted,
+    allowedZones: data.zoneRestricted && data.allowedZones?.length ? data.allowedZones : deleteField(),
+  });
 }

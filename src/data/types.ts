@@ -87,6 +87,23 @@ export interface TableSession {
 export interface Category {
   id: string;
   name: string;
+  // Which food group (shop-level foodGroups list, e.g. "ກຸ່ມເຄື່ອງດື່ມ") this
+  // category belongs to, if any — one level above category.
+  foodGroup?: string;
+  // A single emoji shown next to the category name (see IconPicker.tsx) —
+  // freely chosen, not restricted to any fixed set.
+  icon?: string;
+}
+
+export interface Customer {
+  // Same as `phone` — the customer's 8-digit phone number IS their member
+  // code, so it's used as the Firestore document id too (guarantees it can
+  // never collide with another customer's).
+  id: string;
+  phone: string;
+  name: string;
+  address?: string;
+  enabled: boolean;
 }
 
 export interface ShopProfile {
@@ -106,6 +123,12 @@ export interface StaffPermissions {
   canExpedite: boolean;
 }
 
+// Named job role a staff account can be assigned (see PermCheckboxList.tsx's
+// STAFF_ROLE_LABELS/STAFF_ROLE_PRESETS) — a convenience preset for the
+// granular StaffPermissions checkboxes, not a replacement for them; picking
+// one pre-fills the checkboxes, which stay individually editable after.
+export type StaffRole = "shopAdmin" | "sales" | "server" | "warehouse" | "accounting";
+
 export interface ShopUser {
   id: string;
   email: string;
@@ -114,6 +137,11 @@ export interface ShopUser {
   profileUrl?: string;
   createdAt?: Date;
   permissions?: StaffPermissions;
+  staffRole?: StaffRole;
+  // If true, this staff member may only take orders in `allowedZones`
+  // (matches TableRosterEntry.zone / getTableZones) instead of every zone.
+  zoneRestricted?: boolean;
+  allowedZones?: string[];
 }
 
 export type PaymentType = "cash" | "qr";
@@ -145,7 +173,12 @@ export interface Income {
 // "pending"/"cooking"/"ready"/"served" are dine-in orders working their way
 // through the kitchen before payment; "paid" is the terminal state for both
 // dine-in (closed bill) and the instant-checkout flow (set at creation).
-export type OrderStatus = "pending" | "cooking" | "ready" | "served" | "paid";
+// "cancelled" is a terminal state reached from ANY of the above (an unpaid
+// ticket voided before payment, or an already-paid bill voided after) — see
+// cancelSale() in saleRepository.ts. Unlike the old deleteSale() hard-delete,
+// a cancelled sale keeps its doc (with cancelReason/cancelledAt/By) so it
+// shows up in ปะหวัดการยกเลิกบิล instead of vanishing without a trace.
+export type OrderStatus = "pending" | "cooking" | "ready" | "served" | "paid" | "cancelled";
 
 export interface Sale {
   id: string;
@@ -160,4 +193,8 @@ export interface Sale {
   paidAt?: Date;
   sellerUid?: string;
   sellerName?: string;
+  cancelReason?: string;
+  cancelledAt?: Date;
+  cancelledByUid?: string;
+  cancelledByName?: string;
 }

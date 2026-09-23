@@ -106,11 +106,14 @@ service cloud.firestore {
             || request.resource.data.profileUrl is string
           )
         )
-        // Table roster + zones + service charge — settings behind "ເລືອກໂຕະ"
-        // and its "ຈັດການໂຕະ" / "ຈັດການໂຊນ" pages.
+        // Table roster + zones + service charge + exchange rates — settings
+        // behind "ເລືອກໂຕະ" and its "ຈັດການໂຕະ" / "ຈັດການໂຊນ" pages, plus the
+        // money-at-checkout "ອັດຕາແລກປ່ຽນ" settings (gated the same as
+        // service charge, not canManageProducts, since staff taking orders
+        // are the ones who'd apply it).
         || (
           (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tableRoster', 'tableZones', 'serviceCharge', 'updatedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tableRoster', 'tableZones', 'serviceCharge', 'exchangeRates', 'updatedAt'])
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['tableRoster'])
             || request.resource.data.tableRoster is list
@@ -122,6 +125,32 @@ service cloud.firestore {
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['serviceCharge'])
             || request.resource.data.serviceCharge is map
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['exchangeRates'])
+            || request.resource.data.exchangeRates is list
+          )
+        )
+        // Toppings + serving units + food groups + sizes — menu-configuration,
+        // so gated like managing products rather than table/zone setup.
+        || (
+          (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['toppings', 'units', 'foodGroups', 'sizes', 'updatedAt'])
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['toppings'])
+            || request.resource.data.toppings is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['units'])
+            || request.resource.data.units is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['foodGroups'])
+            || request.resource.data.foodGroups is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sizes'])
+            || request.resource.data.sizes is list
           )
         )
       ));
@@ -214,6 +243,15 @@ service cloud.firestore {
               || (request.resource.data.total is number && request.resource.data.total >= 0)
             )
           )
+          // ຍົກເລີກບິນ (cancelSale): any state -> cancelled, unpaid or
+          // already-paid alike — same authority as the old hard-delete
+          // (canDeleteSales) since this replaces it, just soft.
+          || (
+            (isShopOwner(shopId) || hasStaffPermission(shopId, 'canDeleteSales'))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelReason', 'cancelledAt', 'cancelledByUid', 'cancelledByName'])
+            && resource.data.status != 'cancelled' && request.resource.data.status == 'cancelled'
+            && request.resource.data.cancelReason is string
+          )
         ));
         allow delete: if isControlAdmin()
           || (isTenantActive(shopId) && (
@@ -270,10 +308,37 @@ service cloud.firestore {
         allow create: if isTenantActive(shopId)
           && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'))
           && request.resource.data.keys().hasAll(['name'])
-          && request.resource.data.name is string;
+          && request.resource.data.name is string
+          && (!('foodGroup' in request.resource.data) || request.resource.data.foodGroup is string)
+          && (!('icon' in request.resource.data) || request.resource.data.icon is string);
         allow update: if isTenantActive(shopId)
           && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'))
-          && request.resource.data.name is string;
+          && request.resource.data.name is string
+          && (!('icon' in request.resource.data) || request.resource.data.icon is string)
+          && (!('foodGroup' in request.resource.data) || request.resource.data.foodGroup is string);
+        allow delete: if isTenantActive(shopId) && isShopOwner(shopId);
+      }
+
+      // Customer records — `customerId` (the doc id) always equals the
+      // customer's own `phone` field (8-digit member code, see
+      // customerRepository.ts), so create enforces that match instead of
+      // letting a client pick an arbitrary id. Any shop member can add/edit
+      // (looked up during daily order-taking); delete stays owner-only,
+      // same restriction as categories.
+      match /customers/{customerId} {
+        allow read: if isControlAdmin() || isShopMember(shopId);
+        allow create: if isTenantActive(shopId) && isShopMember(shopId)
+          && customerId == request.resource.data.phone
+          && request.resource.data.phone is string
+          && request.resource.data.phone.matches('^[0-9]{8}$')
+          && request.resource.data.name is string
+          && request.resource.data.enabled is bool
+          && (!('address' in request.resource.data) || request.resource.data.address is string);
+        allow update: if isTenantActive(shopId) && isShopMember(shopId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'enabled', 'address'])
+          && request.resource.data.name is string
+          && request.resource.data.enabled is bool
+          && (!('address' in request.resource.data) || request.resource.data.address is string);
         allow delete: if isTenantActive(shopId) && isShopOwner(shopId);
       }
 

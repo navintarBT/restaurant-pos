@@ -1,7 +1,6 @@
 import {
   collection,
   doc,
-  deleteDoc,
   getDocFromCache,
   getDocs,
   query,
@@ -12,6 +11,7 @@ import {
   writeBatch,
   updateDoc,
   onSnapshot,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import type { Sale, SaleItem, OrderStatus, PaymentType } from "./types";
@@ -240,6 +240,7 @@ function saleFromDoc(d: import("firebase/firestore").QueryDocumentSnapshot): Sal
     ...data,
     createdAt: (data.createdAt as Timestamp).toDate(),
     servedAt: data.servedAt instanceof Timestamp ? data.servedAt.toDate() : undefined,
+    cancelledAt: data.cancelledAt instanceof Timestamp ? data.cancelledAt.toDate() : undefined,
   } as Sale;
 }
 
@@ -335,68 +336,66 @@ export async function getSalesByDateRange(shopId: string, from: Date, to: Date):
     orderBy("createdAt", "desc")
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => {
-    const data = d.data();
-    return {
-      id: d.id,
-      ...data,
-      createdAt: (data.createdAt as Timestamp).toDate(),
-    } as Sale;
-  });
+  return snap.docs.map(saleFromDoc);
 }
 
 
 /**
- * Deletes a sale record. By default also restores the stock it had decremented
- * ("cancel the sale"). Pass restoreStock=false to just delete the history entry
- * as-is, leaving stock untouched (e.g. fixing a duplicate/mistaken record).
+ * Soft-cancels a sale — keeps the doc (flagged status:"cancelled" with a
+ * reason + who/when) instead of hard-deleting it, so it shows up in
+ * ປະຫວັດການຍົກເລີກບິນ instead of disappearing without a trace. Works on a
+ * bill in ANY state: still-open/unpaid (pending/cooking/ready/served) or
+ * already paid.
  */
-export async function deleteSale(shopId: string, sale: Sale, restoreStock = true): Promise<void> {
-  if (!restoreStock) {
-    await deleteDoc(doc(salesCol(shopId), sale.id));
-    return;
-  }
+export async function cancelSale(
+  shopId: string,
+  sale: Sale,
+  data: { reason: string; restoreStock: boolean; cancelledByUid: string; cancelledByName: string },
+): Promise<void> {
   const saleRef = doc(salesCol(shopId), sale.id);
   await runTransaction(db, async (tx) => {
-    // Re-read the sale itself inside the transaction — restoring stock based on the
-    // caller's (possibly stale) in-memory copy risks double-restoring items that a
-    // concurrent edit (e.g. removeItemFromSale) already restored and removed.
     const saleSnap = await tx.get(saleRef);
-    if (!saleSnap.exists()) return; // already deleted by someone else — nothing to do
-    const freshItems = (saleSnap.data().items ?? []) as SaleItem[];
-    const changes = buildStockChanges(freshItems);
+    if (!saleSnap.exists()) return;
+    if (saleSnap.data().status === "cancelled") return; // already cancelled by someone else
 
-    const byProduct = new Map<string, StockChange[]>();
-    for (const ch of changes) {
-      const arr = byProduct.get(ch.productId) ?? [];
-      arr.push(ch);
-      byProduct.set(ch.productId, arr);
-    }
+    if (data.restoreStock) {
+      const freshItems = (saleSnap.data().items ?? []) as SaleItem[];
+      const changes = buildStockChanges(freshItems);
 
-    // Phase 1: all reads
-    const snaps = new Map<string, any>();
-    for (const productId of byProduct.keys()) {
-      const ref = doc(productsCol(shopId), productId);
-      const snap = await tx.get(ref);
-      if (snap.exists()) snaps.set(productId, snap);
-    }
-
-    // Phase 2: restore stock (skip products that no longer exist) + delete the sale
-    for (const [productId, productChanges] of byProduct) {
-      const snap = snaps.get(productId);
-      if (!snap) continue;
-      const ref = doc(productsCol(shopId), productId);
-      const variants: any[] = [...(snap.data().variants ?? [])];
-      for (const ch of productChanges) {
-        const idx = variants.findIndex((v) => v.size === ch.size && v.color === ch.color);
-        if (idx !== -1) {
-          variants[idx] = { ...variants[idx], stock: variants[idx].stock + ch.qty };
-        }
+      const byProduct = new Map<string, StockChange[]>();
+      for (const ch of changes) {
+        const arr = byProduct.get(ch.productId) ?? [];
+        arr.push(ch);
+        byProduct.set(ch.productId, arr);
       }
-      tx.update(ref, { variants });
+
+      const snaps = new Map<string, any>();
+      for (const productId of byProduct.keys()) {
+        const ref = doc(productsCol(shopId), productId);
+        const snap = await tx.get(ref);
+        if (snap.exists()) snaps.set(productId, snap);
+      }
+
+      for (const [productId, productChanges] of byProduct) {
+        const snap = snaps.get(productId);
+        if (!snap) continue;
+        const ref = doc(productsCol(shopId), productId);
+        const variants: any[] = [...(snap.data().variants ?? [])];
+        for (const ch of productChanges) {
+          const idx = variants.findIndex((v) => v.size === ch.size && v.color === ch.color);
+          if (idx !== -1) variants[idx] = { ...variants[idx], stock: variants[idx].stock + ch.qty };
+        }
+        tx.update(ref, { variants });
+      }
     }
 
-    tx.delete(saleRef);
+    tx.update(saleRef, {
+      status: "cancelled",
+      cancelReason: data.reason,
+      cancelledAt: serverTimestamp(),
+      cancelledByUid: data.cancelledByUid,
+      cancelledByName: data.cancelledByName,
+    });
   });
 }
 
@@ -415,7 +414,7 @@ export async function removeItemFromSale(
 ): Promise<Sale | null> {
   const saleRef = doc(salesCol(shopId), sale.id);
   return runTransaction<Sale | null>(db, async (tx) => {
-    // Re-read the sale itself inside the transaction, same reasoning as deleteSale —
+    // Re-read the sale itself inside the transaction, same reasoning as cancelSale —
     // otherwise a concurrent edit can be silently overwritten or stock double-restored.
     const saleSnap = await tx.get(saleRef);
     if (!saleSnap.exists()) return null; // already deleted by someone else
