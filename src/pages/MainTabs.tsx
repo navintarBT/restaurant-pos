@@ -49,6 +49,9 @@ import {
   menuOutline,
   trashOutline,
   cubeOutline,
+  returnUpBackOutline,
+  colorPaletteOutline,
+  printOutline,
 } from "ionicons/icons";
 import { CartProvider } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
@@ -57,6 +60,7 @@ import { getProducts } from "../data/productRepository";
 const Sell = lazy(() => import("./Sell"));
 const Products = lazy(() => import("./Products"));
 const Stock = lazy(() => import("./Stock"));
+const Returns = lazy(() => import("./Returns"));
 const Summary = lazy(() => import("./Summary"));
 const Finance = lazy(() => import("./Finance"));
 const SalesHistory = lazy(() => import("./SalesHistory"));
@@ -83,6 +87,10 @@ const ManageFoodGroups = lazy(() => import("./ManageFoodGroups"));
 const CreateFoodGroup = lazy(() => import("./CreateFoodGroup"));
 const ManageSizes = lazy(() => import("./ManageSizes"));
 const CreateSize = lazy(() => import("./CreateSize"));
+const ManageColors = lazy(() => import("./ManageColors"));
+const CreateColor = lazy(() => import("./CreateColor"));
+const ManagePrinters = lazy(() => import("./ManagePrinters"));
+const PrinterForm = lazy(() => import("./PrinterForm"));
 const ManageExchangeRates = lazy(() => import("./ManageExchangeRates"));
 const CreateExchangeRate = lazy(() => import("./CreateExchangeRate"));
 const ManageCustomers = lazy(() => import("./ManageCustomers"));
@@ -110,7 +118,8 @@ function useStockAlertCount(shopId: string | null) {
     const products = await getProducts(shopId);
     if (requestId !== requestIdRef.current) return; // superseded by a newer refresh
     const n = products.filter((p) =>
-      p.variants.some((v) => v.stock <= (v.minStock ?? 5))
+      p.trackStock !== false && p.alertEnabled !== false &&
+      p.variants.some((v) => v.status !== "inactive" && v.stock <= (p.reorderPoint ?? 5))
     ).length;
     setCount(n);
   }
@@ -428,6 +437,22 @@ const MainTabs: React.FC = () => {
                           </IonItem>
                         </IonMenuToggle>
                       )}
+                      {permissions.canManageProducts && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-colors" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={colorPaletteOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການສີ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
+                      {permissions.canManageProducts && (
+                        <IonMenuToggle autoHide={false}>
+                          <IonItem button detail={false} routerLink="/tabs/manage-printers" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                            <IonIcon slot="start" icon={printOutline} color="primary" />
+                            <IonLabel style={{ fontWeight: 600 }}>ຈັດການເຄື່ອງພິມ</IonLabel>
+                          </IonItem>
+                        </IonMenuToggle>
+                      )}
                       <IonMenuToggle autoHide={false}>
                         <IonItem button detail={false} routerLink="/tabs/manage-customers" style={{ "--background-hover": "var(--app-accent-surface)" }}>
                           <IonIcon slot="start" icon={idCardOutline} color="primary" />
@@ -455,9 +480,23 @@ const MainTabs: React.FC = () => {
                   <IonItem button detail={false} routerLink="/tabs/products" style={{ "--background-hover": "var(--app-accent-surface)" }}>
                     <IonIcon slot="start" icon={restaurantOutline} color="primary" />
                     <IonLabel style={{ fontWeight: 600 }}>ເມນູ</IonLabel>
+                  </IonItem>
+                </IonMenuToggle>
+                <IonMenuToggle autoHide={false}>
+                  <IonItem button detail={false} routerLink="/tabs/stock" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                    <IonIcon slot="start" icon={cubeOutline} color="primary" />
+                    <IonLabel style={{ fontWeight: 600 }}>ສະຕັອກ</IonLabel>
                     {alertCount > 0 && <IonBadge color="danger">{alertCount}</IonBadge>}
                   </IonItem>
                 </IonMenuToggle>
+                {features.returnEnabled && permissions.canManageProducts && (
+                  <IonMenuToggle autoHide={false}>
+                    <IonItem button detail={false} routerLink="/tabs/returns" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                      <IonIcon slot="start" icon={returnUpBackOutline} color="primary" />
+                      <IonLabel style={{ fontWeight: 600 }}>ສົ່ງຄືນ</IonLabel>
+                    </IonItem>
+                  </IonMenuToggle>
+                )}
                 <IonMenuToggle autoHide={false}>
                   <IonItem button detail={false} routerLink="/tabs/finance" style={{ "--background-hover": "var(--app-accent-surface)" }}>
                     <IonIcon slot="start" icon={walletOutline} color="primary" />
@@ -521,6 +560,14 @@ const MainTabs: React.FC = () => {
           <Route exact path="/tabs/products">
             <Suspense fallback={<RouteFallback />}><Products onStockChanged={refreshAlerts} /></Suspense>
           </Route>
+          <Route exact path="/tabs/stock">
+            <Suspense fallback={<RouteFallback />}><Stock /></Suspense>
+          </Route>
+          {features.returnEnabled && (
+            <Route exact path="/tabs/returns">
+              <Suspense fallback={<RouteFallback />}><Returns /></Suspense>
+            </Route>
+          )}
           <Route exact path="/tabs/summary">
             <Suspense fallback={<RouteFallback />}><Summary /></Suspense>
           </Route>
@@ -646,6 +693,26 @@ const MainTabs: React.FC = () => {
           {permissions.canManageProducts && (
             <Route exact path="/tabs/create-size">
               <Suspense fallback={<RouteFallback />}><CreateSize /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/manage-colors">
+              <Suspense fallback={<RouteFallback />}><ManageColors /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/create-color/:hex?">
+              <Suspense fallback={<RouteFallback />}><CreateColor /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/manage-printers">
+              <Suspense fallback={<RouteFallback />}><ManagePrinters /></Suspense>
+            </Route>
+          )}
+          {permissions.canManageProducts && (
+            <Route exact path="/tabs/printer-form/:id?">
+              <Suspense fallback={<RouteFallback />}><PrinterForm /></Suspense>
             </Route>
           )}
           {permissions.canTakeOrders && (

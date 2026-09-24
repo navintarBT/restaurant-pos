@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   IonModal, IonHeader, IonToolbar, IonTitle, IonContent, IonFooter,
   IonButtons, IonButton, IonIcon, IonSpinner, IonAlert, IonInput, IonLabel,
@@ -21,9 +21,13 @@ interface Props {
   products: Product[];
   shopId: string;
   isOwner?: boolean;
+  // Bumped by Products.tsx when ProductForm's type-selector redirects into
+  // bundle creation (see ProductForm's onRequestBundle) — jumps straight
+  // into the create form instead of the bundle list.
+  autoOpenCreateSignal?: number;
 }
 
-const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) => {
+const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false, autoOpenCreateSignal }) => {
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,6 +58,17 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
   }, [shopId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Guard against firing on mount — only open when the signal actually
+  // changes to a new value (a fresh redirect request from ProductForm).
+  const lastSignal = useRef(autoOpenCreateSignal);
+  useEffect(() => {
+    if (autoOpenCreateSignal !== undefined && autoOpenCreateSignal !== lastSignal.current) {
+      lastSignal.current = autoOpenCreateSignal;
+      openCreate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenCreateSignal]);
 
   function openCreate() {
     setEditingId(null);
@@ -120,7 +135,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
     setFormItems((prev) => {
       const exists = prev.some((i) => i.productId === p.id);
       if (exists) return prev.filter((i) => i.productId !== p.id);
-      return [...prev, { productId: p.id, productName: p.name, quantity: 1, costPrice: p.costPrice }];
+      return [...prev, { productId: p.id, productName: p.name, quantity: 1, costPrice: p.variants[0]?.costPrice ?? p.costPrice ?? 0 }];
     });
   }
 
@@ -431,7 +446,7 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) =
                         {p.name}
                       </p>
                       <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "var(--app-text-secondary)" }}>
-                        {p.costPrice ? `ຕົ້ນທຶນ ${fmtK(p.costPrice)} ກີບ` : "ບໍ່ມີຕົ້ນທຶນ"}
+                        {(() => { const c = p.variants[0]?.costPrice ?? p.costPrice ?? 0; return c ? `ຕົ້ນທຶນ ${fmtK(c)} ກີບ` : "ບໍ່ມີຕົ້ນທຶນ"; })()}
                         {" · "}{p.variants.length} variant
                       </p>
                     </div>

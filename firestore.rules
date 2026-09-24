@@ -131,11 +131,12 @@ service cloud.firestore {
             || request.resource.data.exchangeRates is list
           )
         )
-        // Toppings + serving units + food groups + sizes — menu-configuration,
-        // so gated like managing products rather than table/zone setup.
+        // Toppings + serving units + food groups + sizes + colors —
+        // menu-configuration, so gated like managing products rather than
+        // table/zone setup.
         || (
           (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'))
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['toppings', 'units', 'foodGroups', 'sizes', 'updatedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['toppings', 'units', 'foodGroups', 'sizes', 'colors', 'updatedAt'])
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['toppings'])
             || request.resource.data.toppings is list
@@ -151,6 +152,10 @@ service cloud.firestore {
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sizes'])
             || request.resource.data.sizes is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['colors'])
+            || request.resource.data.colors is list
           )
         )
       ));
@@ -346,6 +351,14 @@ service cloud.firestore {
         allow read:           if isControlAdmin() || isShopMember(shopId);
         allow create, update: if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'));
         allow delete:         if isTenantActive(shopId) && isShopOwner(shopId);
+      }
+
+      // Saved printer connection profiles — configuration only, gated the
+      // same as every other menu-configuration list (canManageProducts).
+      match /printers/{printerId} {
+        allow read:           if isControlAdmin() || isShopMember(shopId);
+        allow create, update: if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'));
+        allow delete:         if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'));
       }
 
       match /returns/{returnId} {

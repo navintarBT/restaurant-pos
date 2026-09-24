@@ -69,17 +69,17 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
     setGiftPickerOpen(true);
   }
 
-  function handleAddGift(picked: { variant: ProductVariant; quantity: number }[]) {
+  function handleAddGift(picked: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number }[]) {
     if (!giftVariantProduct || !giftForKey) return;
-    picked.forEach(({ variant, quantity }) => {
+    picked.forEach(({ variant, quantity, unitPrice, costPrice }) => {
       addItem({
         productId: giftVariantProduct.id,
         productName: giftVariantProduct.name,
         variant,
         quantity,
-        originalPrice: giftVariantProduct.price,
+        originalPrice: unitPrice,
         unitPrice: 0,
-        costPrice: giftVariantProduct.costPrice,
+        costPrice,
         isGift: true,
         giftForKey,
       });
@@ -146,6 +146,10 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
   // stock" for an item that was already sitting in the cart.
   const totalReserved = computeReserved(items);
   function maxQtyFor(item: SaleItem): number {
+    if (!item.isBundle) {
+      const p = products.find((x) => x.id === item.productId);
+      if (p?.trackStock === false) return Infinity;
+    }
     if (item.isBundle && item.bundleItems) {
       let max = Infinity;
       for (const bi of item.bundleItems) {

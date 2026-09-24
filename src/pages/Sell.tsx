@@ -90,17 +90,17 @@ const Sell: React.FC = () => {
     ? productsEffective
     : productsEffective.filter((p) => p.category === activeCategory);
 
-  function handleAddToCart(items: { variant: ProductVariant; quantity: number }[]) {
+  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number }[]) {
     if (!pickerProduct) return;
-    items.forEach(({ variant, quantity }) => {
+    items.forEach(({ variant, quantity, unitPrice, costPrice }) => {
       addItem({
         productId: pickerProduct.id,
         productName: pickerProduct.name,
         variant,
         quantity,
-        originalPrice: pickerProduct.price,
-        unitPrice: pickerProduct.price,
-        costPrice: pickerProduct.costPrice,
+        originalPrice: unitPrice,
+        unitPrice,
+        costPrice,
       });
     });
   }
@@ -365,8 +365,12 @@ const Sell: React.FC = () => {
               <IonGrid style={{ padding: "12px 8px" }}>
                 <IonRow>
                   {filtered.map((p) => {
+                    const tracked = p.trackStock !== false;
                     const totalStock = p.variants.reduce((s, v) => s + v.stock, 0);
-                    const outOfStock = totalStock === 0;
+                    const outOfStock = tracked && totalStock === 0;
+                    const prices = p.variants.map((v) => v.price ?? p.price ?? 0);
+                    const minP = Math.min(...prices);
+                    const maxP = Math.max(...prices);
                     return (
                       <IonCol key={p.id} size="6" sizeMd="4" sizeLg="3" style={{ padding: 6 }}>
                         <button
@@ -385,6 +389,8 @@ const Sell: React.FC = () => {
                           <div style={{ fontSize: 38, marginBottom: 6, lineHeight: 1 }}>
                             {p.photoUrl
                               ? <img src={p.photoUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
+                              : p.color
+                              ? <div style={{ width: 44, height: 44, borderRadius: 8, background: p.color }} />
                               : "🍽️"
                             }
                           </div>
@@ -392,15 +398,15 @@ const Sell: React.FC = () => {
                             {p.name}
                           </div>
                           <div style={{ fontWeight: 800, fontSize: "1rem", color: "var(--ion-color-primary)", marginBottom: 4 }}>
-                            {fmtK(p.price)} ກີບ
+                            {minP === maxP ? `${fmtK(minP)} ກີບ` : `${fmtK(minP)}–${fmtK(maxP)} ກີບ`}
                           </div>
                           <div style={{
                             display: "inline-block", fontSize: "0.72rem", fontWeight: 600,
                             padding: "2px 8px", borderRadius: 20,
-                            background: outOfStock ? "rgba(220,38,38,0.12)" : totalStock <= 3 ? "rgba(217,119,6,0.12)" : "rgba(22,163,74,0.12)",
-                            color: outOfStock ? "var(--app-danger)" : totalStock <= 3 ? "var(--app-warning)" : "var(--app-success)",
+                            background: !tracked ? "rgba(107,114,128,0.12)" : outOfStock ? "rgba(220,38,38,0.12)" : totalStock <= 3 ? "rgba(217,119,6,0.12)" : "rgba(22,163,74,0.12)",
+                            color: !tracked ? "var(--app-text-muted)" : outOfStock ? "var(--app-danger)" : totalStock <= 3 ? "var(--app-warning)" : "var(--app-success)",
                           }}>
-                            {outOfStock ? "ໝົດ" : `${totalStock} ຊິ້ນ`}
+                            {!tracked ? "ບໍ່ຈຳກັດ" : outOfStock ? "ໝົດ" : `${totalStock} ຊິ້ນ`}
                           </div>
                         </button>
                       </IonCol>

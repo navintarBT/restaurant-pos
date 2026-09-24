@@ -20,23 +20,76 @@ export interface ReturnRecord {
 
 export interface ProductVariant {
   size: string;
+  // Flavor name (from Product.flavors) when Product.hasFlavors is true;
+  // otherwise "" — was previously a freeform "option" text field (spice
+  // level / no-ice / etc.), see the flavor-auto-migration note on Product.
   color: string;
   stock: number;
+  // LEGACY — superseded by Product.reorderPoint (one value per product
+  // instead of per variant). No longer written by ProductForm; kept only so
+  // old docs still typecheck. Every consumer falls back to
+  // `product.reorderPoint ?? variant.minStock ?? 5`.
   minStock?: number;
+  // Per-variant sell/cost price. Optional so legacy docs (written before
+  // this field existed) still typecheck — every read site falls back to the
+  // old product-level Product.price/.costPrice.
+  price?: number;
+  costPrice?: number;
+  // Absent/"active" = sellable; "inactive" = hidden from VariantPicker and
+  // excluded from stock alerts.
+  status?: "active" | "inactive";
 }
 
 export interface Product {
   id: string;
   name: string;
   category?: string;
+  // LEGACY — no longer written by ProductForm; kept as the fallback base for
+  // ProductVariant.price/.costPrice on old docs (see ProductVariant above).
   price: number;
   costPrice?: number;
   photoUrl?: string;
+  // Alternative to photoUrl when no product photo is set — mutually
+  // exclusive with it as the "active" visual representation (a hex color).
+  color?: string;
   variants: ProductVariant[];
   canBeGift?: boolean;
   // Absent/true = goes through the kitchen (Kitchen.tsx); explicitly false =
   // skips straight to "ready" (Expedite.tsx) — e.g. drinks that need no cooking.
   needsKitchen?: boolean;
+  // Product code / SKU, freeform.
+  code?: string;
+  // Absent/"regular" = a normal menu item; "promotion" = tagged as a promo.
+  // "bundle"/set items are never represented here — picking that option in
+  // ProductForm redirects into the separate Bundle system (BundleManager.tsx)
+  // instead of persisting onto a Product doc.
+  productType?: "regular" | "promotion";
+  // From the shop's reusable Units list (getUnits/setUnits).
+  unit?: string;
+  // Low-stock threshold, one value for the whole product (replaces the old
+  // per-variant minStock — see ProductVariant.minStock). Default 5 if unset.
+  reorderPoint?: number;
+  // Absent/true = this product participates in Stock.tsx's low/out-of-stock
+  // alerts; explicitly false = excluded regardless of actual stock levels.
+  alertEnabled?: boolean;
+  // Product-scoped flavor system (distinct from the shop-wide Toppings
+  // list). When true, each variant's `color` is picked from `flavors`
+  // instead of typed freeform.
+  hasFlavors?: boolean;
+  flavors?: string[];
+  // Absent/true = normal stock deduction on sale (today's behavior).
+  // Explicitly false = this product's stock is never validated or deducted
+  // at sale time, regardless of the quantity sold or each variant's `stock`
+  // number — see saleRepository.ts's stock-transaction functions.
+  trackStock?: boolean;
+  // Which of the shop's reusable Toppings (getToppings/setToppings, matched
+  // by ToppingEntry.name) are offered for this product, and how many of them
+  // a customer may pick. maxToppings undefined/0 = unlimited. Selecting
+  // toppings at order time is not wired up yet — this only stores the
+  // product's configuration.
+  hasToppings?: boolean;
+  toppingNames?: string[];
+  maxToppings?: number;
 }
 
 export interface BundleItem {
@@ -93,6 +146,47 @@ export interface Category {
   // A single emoji shown next to the category name (see IconPicker.tsx) —
   // freely chosen, not restricted to any fixed set.
   icon?: string;
+}
+
+export type PrinterConnectionType = "wifi" | "bluetooth" | "usb";
+
+// What a ticket printed on this printer is used for — a printer can serve
+// several roles at once (e.g. one kitchen printer doubling as the report
+// printer). "ເລືອກທັງໝົດ" (select all) in PrinterForm.tsx is just a UI
+// convenience that toggles every value here on/off — it is not itself
+// stored as a role.
+export type PrinterRole =
+  | "billInvoice"    // ໃບຮຽກເກັບເງິນ
+  | "receipt"        // ໃບຮັບເງິນ
+  | "qrDelivery"     // QR ສົ່ງອາຫານ
+  | "kitchen1"       // ຫ້ອງຄົວ1
+  | "kitchen2"       // ຫ້ອງຄົວ2
+  | "bar1"           // ບານໍ້າ1
+  | "bar2"           // ບານໍ້າ2
+  | "reportsCancel"; // ພິມລາຍງານ/ຍົກເລີກອໍເດີ
+
+// A saved connection profile for a receipt/kitchen printer — configuration
+// only (name, address, behavior). Does not itself talk to a printer; there
+// is no native Bluetooth/USB pairing or ESC/POS printing wired up yet.
+export interface Printer {
+  id: string;
+  name: string;
+  connectionType: PrinterConnectionType;
+  // Only meaningful for connectionType "wifi".
+  ip?: string;
+  port?: string;
+  // Only meaningful for connectionType "bluetooth" — a MAC address or
+  // device name entered by staff, not paired live.
+  bluetoothAddress?: string;
+  paperSize: string; // e.g. "58mm" / "80mm" / a custom value
+  // 1 receipt per cut ("perItem") vs one combined ticket for every item on
+  // the order ("combined").
+  kitchenTicketMode: "perItem" | "combined";
+  shared: boolean;
+  cashDrawerOnCheckout: boolean;
+  // Blank paper feed (mm) before auto-cut.
+  feedBeforeCut: number;
+  roles: PrinterRole[];
 }
 
 export interface Customer {

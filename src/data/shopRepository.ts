@@ -192,6 +192,20 @@ export async function setSizes(shopId: string, sizes: string[]): Promise<void> {
   });
 }
 
+/** Reusable color swatches (hex, e.g. "#e07b39") for menu item variants —
+ * menu-configuration, gated the same as toppings/units/sizes. */
+export async function getColors(shopId: string): Promise<string[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.colors as string[] | undefined) ?? [];
+}
+
+export async function setColors(shopId: string, colors: string[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    colors,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export type CurrencyCode = "LAK" | "THB" | "USD" | "CNY" | "JPY";
 
 export const CURRENCY_LABELS: Record<CurrencyCode, string> = {

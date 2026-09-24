@@ -56,10 +56,13 @@ const Stock: React.FC = () => {
   const outOfStock: AlertEntry[] = [];
   const lowStock: AlertEntry[] = [];
   products.forEach((p) => {
+    if (p.trackStock === false || p.alertEnabled === false) return;
+    const reorderPoint = p.reorderPoint ?? 5;
     p.variants.forEach((v) => {
+      if (v.status === "inactive") return;
       if (v.stock === 0) {
         outOfStock.push({ product: p, variant: v });
-      } else if (v.stock <= (v.minStock ?? 5)) {
+      } else if (v.stock <= reorderPoint) {
         lowStock.push({ product: p, variant: v });
       }
     });
@@ -106,7 +109,7 @@ const Stock: React.FC = () => {
                     <IonLabel>
                       <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>{p.name}</div>
                       <div style={{ fontSize: "0.82rem", color: "var(--app-text-secondary)", marginTop: 2 }}>
-                        {v.size} / {v.color}
+                        {v.size}{v.color ? ` / ${v.color}` : ""}
                       </div>
                       <div style={{ fontSize: "0.78rem", color: "var(--app-danger)", marginTop: 2 }}>ເມນູໝົດ</div>
                     </IonLabel>
@@ -126,10 +129,10 @@ const Stock: React.FC = () => {
                     <IonLabel>
                       <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>{p.name}</div>
                       <div style={{ fontSize: "0.82rem", color: "var(--app-text-secondary)", marginTop: 2 }}>
-                        {v.size} / {v.color}
+                        {v.size}{v.color ? ` / ${v.color}` : ""}
                       </div>
                       <div style={{ fontSize: "0.78rem", color: "var(--app-warning)", marginTop: 2 }}>
-                        ເຫຼືອ {v.stock} ຊິ້ນ · ເຕືອນທີ່ ≤ {v.minStock ?? 5} ຊິ້ນ
+                        ເຫຼືອ {v.stock} ຊິ້ນ · ເຕືອນທີ່ ≤ {p.reorderPoint ?? 5} ຊິ້ນ
                       </div>
                     </IonLabel>
                   </IonItem>

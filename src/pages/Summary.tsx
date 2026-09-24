@@ -187,21 +187,17 @@ const Summary: React.FC = () => {
       return is;
     }, 0), 0);
 
-  const invProducts   = products.filter(p => p.costPrice != null && p.costPrice > 0);
-  const hasInvCost    = invProducts.length > 0;
-  const invUnits      = products.reduce((s, p) => s + p.variants.reduce((vs, v) => vs + v.stock, 0), 0);
-  const invSellTotal  = products.reduce((s, p) => {
-    const stock = p.variants.reduce((vs, v) => vs + v.stock, 0);
-    return s + p.price * stock;
-  }, 0);
-  const invCostTotal  = invProducts.reduce((s, p) => {
-    const stock = p.variants.reduce((vs, v) => vs + v.stock, 0);
-    return s + (p.costPrice ?? 0) * stock;
-  }, 0);
-  const invProfTotal  = invProducts.reduce((s, p) => {
-    const stock = p.variants.reduce((vs, v) => vs + v.stock, 0);
-    return s + (p.price - (p.costPrice ?? 0)) * stock;
-  }, 0);
+  // Untracked products' stock numbers aren't maintained by sales, so they're
+  // excluded from valuation (they'd overstate inventory value) — see
+  // InventoryReportSheet.tsx's computeRow, same reasoning.
+  const invTrackedProducts = products.filter(p => p.trackStock !== false);
+  const hasInvCost   = invTrackedProducts.some(p => p.variants.some(v => (v.costPrice ?? p.costPrice ?? 0) > 0));
+  const invUnits      = invTrackedProducts.reduce((s, p) => s + p.variants.reduce((vs, v) => vs + v.stock, 0), 0);
+  const invSellTotal  = invTrackedProducts.reduce((s, p) =>
+    s + p.variants.reduce((vs, v) => vs + (v.price ?? p.price ?? 0) * v.stock, 0), 0);
+  const invCostTotal  = invTrackedProducts.reduce((s, p) =>
+    s + p.variants.reduce((vs, v) => vs + (v.costPrice ?? p.costPrice ?? 0) * v.stock, 0), 0);
+  const invProfTotal  = invSellTotal - invCostTotal;
   const costPct   = invSellTotal > 0 ? Math.round((invCostTotal / invSellTotal) * 100) : 0;
   const profitPct = 100 - costPct;
 

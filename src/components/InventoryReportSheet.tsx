@@ -26,9 +26,14 @@ interface ProductRow {
 
 function computeRow(p: Product): ProductRow {
   const totalStock = p.variants.reduce((s, v) => s + v.stock, 0);
-  const hasCost = p.costPrice != null && p.costPrice > 0;
-  const costTotal = hasCost ? (p.costPrice ?? 0) * totalStock : 0;
-  const sellTotal = p.price * totalStock;
+  // Untracked products' stock numbers aren't maintained by sales, so they're
+  // excluded from the valuation totals (they'd overstate inventory value).
+  if (p.trackStock === false) {
+    return { product: p, totalStock, costTotal: 0, sellTotal: 0, profitTotal: 0, hasCost: false };
+  }
+  const sellTotal = p.variants.reduce((s, v) => s + (v.price ?? p.price ?? 0) * v.stock, 0);
+  const costTotal = p.variants.reduce((s, v) => s + (v.costPrice ?? p.costPrice ?? 0) * v.stock, 0);
+  const hasCost = costTotal > 0;
   const profitTotal = hasCost ? sellTotal - costTotal : 0;
   return { product: p, totalStock, costTotal, sellTotal, profitTotal, hasCost };
 }

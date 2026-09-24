@@ -73,6 +73,7 @@ async function applyStockChangesInTransaction(
   // Phase 2: validate + all writes
   for (const [productId, productChanges] of byProduct) {
     const snap = snaps.get(productId)!;
+    if (snap.data().trackStock === false) continue; // untracked: skip validation + write entirely
     const ref = doc(productsCol(shopId), productId);
     const variants: any[] = [...(snap.data().variants ?? [])];
     for (const ch of productChanges) {
@@ -157,7 +158,7 @@ async function recordSaleProvisional(
     } catch {
       continue; // never cached locally — can't adjust its stock offline
     }
-    if (snap.exists()) {
+    if (snap.exists() && snap.data().trackStock !== false) {
       const variants: any[] = [...(snap.data().variants ?? [])];
       for (const ch of productChanges) {
         const idx = variants.findIndex((v) => v.size === ch.size && v.color === ch.color);
@@ -379,6 +380,7 @@ export async function cancelSale(
       for (const [productId, productChanges] of byProduct) {
         const snap = snaps.get(productId);
         if (!snap) continue;
+        if (snap.data().trackStock === false) continue; // deduction never happened; don't restore either
         const ref = doc(productsCol(shopId), productId);
         const variants: any[] = [...(snap.data().variants ?? [])];
         for (const ch of productChanges) {
@@ -443,6 +445,7 @@ export async function removeItemFromSale(
       for (const [productId, productChanges] of byProduct) {
         const snap = snaps.get(productId);
         if (!snap) continue;
+        if (snap.data().trackStock === false) continue; // deduction never happened; don't restore either
         const ref = doc(productsCol(shopId), productId);
         const variants: any[] = [...(snap.data().variants ?? [])];
         for (const ch of productChanges) {

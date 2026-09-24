@@ -168,7 +168,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
     setRSaving(true);
     try {
       const variantQtys = rProduct.variants
-        .map((v, idx) => ({ size: v.size, color: v.color, qty: rQtys[idx] ?? 0, costPrice: rProduct.costPrice ?? 0, sellingPrice: rProduct.price ?? 0 }))
+        .map((v, idx) => ({ size: v.size, color: v.color, qty: rQtys[idx] ?? 0, costPrice: v.costPrice ?? rProduct.costPrice ?? 0, sellingPrice: v.price ?? rProduct.price ?? 0 }))
         .filter((x) => x.qty > 0);
       await processAtomicReturn(shopId, rProduct, variantQtys, rPayment);
       const updatedProduct: Product = {
@@ -201,7 +201,7 @@ const ReturnForm: React.FC<Props> = ({ isOpen, products, shopId, onDismiss, onSa
     setTSaving(true);
     try {
       const variantQtys = tProduct.variants
-        .map((v, idx) => ({ size: v.size, color: v.color, qty: tQtys[idx] ?? 0, costPrice: tProduct.costPrice ?? 0 }))
+        .map((v, idx) => ({ size: v.size, color: v.color, qty: tQtys[idx] ?? 0, costPrice: v.costPrice ?? tProduct.costPrice ?? 0 }))
         .filter((x) => x.qty > 0);
       await processAtomicTransfer(shopId, tProduct, variantQtys, tNote.trim() || undefined);
       const updatedProduct: Product = {

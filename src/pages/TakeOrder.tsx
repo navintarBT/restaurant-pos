@@ -21,18 +21,20 @@ import {
   IonSearchbar,
   useIonViewWillEnter,
 } from "@ionic/react";
-import { trashOutline, qrCodeOutline, addOutline, chevronBackOutline, printOutline, settingsOutline, refreshOutline } from "ionicons/icons";
+import { trashOutline, qrCodeOutline, addOutline, removeOutline, checkmarkOutline, chevronBackOutline, printOutline, settingsOutline, refreshOutline } from "ionicons/icons";
 import QRCode from "qrcode";
 import { fmtK } from "../utils/format";
 import { useAuth } from "../context/AuthContext";
 import { getProducts } from "../data/productRepository";
+import { getBundles } from "../data/bundleRepository";
 import { createOrder, getOrdersBySession } from "../data/saleRepository";
 import { getOrCreateOpenSession, getOpenSessions, closeSession } from "../data/tableSessionRepository";
 import { getTableRoster, tableDisplayLabel, type TableRosterEntry } from "../data/shopRepository";
+import { computeReserved, reservedKey } from "../utils/stock";
 import VariantPicker from "../components/VariantPicker";
 import ShopHeaderTag from "../components/ShopHeaderTag";
 import EmptyState from "../components/EmptyState";
-import type { Product, ProductVariant, SaleItem, TableSession } from "../data/types";
+import type { Bundle, BundleItem, OrderStatus, Product, ProductVariant, Sale, SaleItem, TableSession } from "../data/types";
 
 function itemKey(item: Pick<SaleItem, "productId" | "variant">) {
   return `${item.productId}__${item.variant.size}__${item.variant.color}`;
@@ -68,6 +70,16 @@ const STATUS_LABEL: Record<TableStatus, { text: string; color: string; bg: strin
   served: { text: "🧾 ລໍຖ້າເກັບເງິນ", color: "var(--app-danger)", bg: "var(--app-danger-surface)" },
 };
 
+// ປະຫວັດການສັ່ງ ticket status — one badge per already-confirmed order.
+const ORDER_STATUS_LABEL: Record<OrderStatus, { text: string; color: string; bg: string }> = {
+  pending: { text: "🔥 ລໍຖ້າເຮັດ", color: "var(--app-warning)", bg: "var(--app-warning-surface)" },
+  cooking: { text: "🔥 ກຳລັງເຮັດ", color: "var(--app-warning)", bg: "var(--app-warning-surface)" },
+  ready: { text: "✅ ພ້ອມເສີບ", color: "var(--ion-color-primary)", bg: "var(--app-accent-surface)" },
+  served: { text: "🧾 ເສີບແລ້ວ", color: "var(--app-success)", bg: "var(--app-success-surface)" },
+  paid: { text: "💰 ຈ່າຍແລ້ວ", color: "var(--app-success)", bg: "var(--app-success-surface)" },
+  cancelled: { text: "✕ ຍົກເລີກ", color: "var(--app-danger)", bg: "var(--app-danger-surface)" },
+};
+
 const TakeOrder: React.FC = () => {
   const { shopId, user, displayName, zoneRestricted, allowedZones } = useAuth();
 
@@ -89,14 +101,27 @@ const TakeOrder: React.FC = () => {
 
   // ── Step 2: menu + cart for the chosen table ────────────────────────────
   const [products, setProducts] = useState<Product[]>([]);
+  const [bundles, setBundles] = useState<Bundle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [menuTab, setMenuTab] = useState<"regular" | "bundle" | "promotion">("regular");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [menuSearch, setMenuSearch] = useState("");
   const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
+  const [bundlePickerTarget, setBundlePickerTarget] = useState<Bundle | null>(null);
+  const [chosenVariants, setChosenVariants] = useState<Record<number, ProductVariant>>({});
+  const [bundleQty, setBundleQty] = useState(1);
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [tableLabel, setTableLabel] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── ເພີ່ມໃໝ່ (build the next ticket) vs ປະຫວັດການສັ່ງ (already-confirmed
+  // tickets for this table's current session) ──
+  const [orderView, setOrderView] = useState<"new" | "history">("new");
+  const [tableSession, setTableSession] = useState<TableSession | null>(null);
+  const [historyOrders, setHistoryOrders] = useState<Sale[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrBusy, setQrBusy] = useState(false);
@@ -235,6 +260,11 @@ const TakeOrder: React.FC = () => {
 
   function selectTable(label: string) {
     setTableLabel(label);
+    // Resolve this table's already-open session (if any) from the tile list
+    // just loaded in Step 1, so ປະຫວັດການສັ່ງ has something to fetch by right
+    // away — a brand-new table with nothing sent yet simply has none.
+    setTableSession(openTables.find((t) => t.session.tableLabel === label)?.session ?? null);
+    setOrderView("new");
     setStep("menu");
   }
 
@@ -261,7 +291,12 @@ const TakeOrder: React.FC = () => {
     if (!shopId) return;
     setLoading(true);
     try {
-      setProducts(await getProducts(shopId));
+      const [prods, bunds] = await Promise.all([
+        getProducts(shopId),
+        getBundles(shopId).catch(() => [] as Bundle[]),
+      ]);
+      setProducts(prods);
+      setBundles(bunds);
     } finally {
       setLoading(false);
     }
@@ -278,33 +313,40 @@ const TakeOrder: React.FC = () => {
   // Stock already added to this order isn't reserved server-side yet (that
   // only happens once "ຢືນຢັນຈັດຕຽມອໍເດີ" commits the transaction) — subtract it
   // client-side so re-opening the picker can't add more than what's left.
-  const reserved = new Map<string, number>();
-  for (const item of cart) {
-    const k = itemKey(item);
-    reserved.set(k, (reserved.get(k) ?? 0) + item.quantity);
-  }
+  // computeReserved also accounts for quantities hidden inside bundle items,
+  // not just plain cart lines (see utils/stock.ts).
+  const reserved = computeReserved(cart);
   const productsEffective = products.map((p) => ({
     ...p,
     variants: p.variants.map((v) => {
-      const inCart = reserved.get(`${p.id}__${v.size}__${v.color}`) ?? 0;
+      const inCart = reserved.get(reservedKey(p.id, v.size, v.color)) ?? 0;
       return inCart > 0 ? { ...v, stock: Math.max(0, v.stock - inCart) } : v;
     }),
   }));
 
-  const categories = [...new Set(products.map((p) => p.category).filter(Boolean) as string[])];
-  const filtered = activeCategory === "all" ? productsEffective : productsEffective.filter((p) => p.category === activeCategory);
+  // ເມນູທົ່ວໄປ/ໂປຣໂມຊັນ are both regular Products, distinguished only by
+  // productType (mutually exclusive — see ProductForm's type selector);
+  // ຊຸດ (bundle) is a separate collection entirely, rendered from `bundles`.
+  const typeFiltered = productsEffective.filter((p) =>
+    menuTab === "promotion" ? p.productType === "promotion" : p.productType !== "promotion"
+  );
+  const categories = [...new Set(typeFiltered.map((p) => p.category).filter(Boolean) as string[])];
+  const categoryFiltered = activeCategory === "all" ? typeFiltered : typeFiltered.filter((p) => p.category === activeCategory);
+  const searchQ = menuSearch.trim().toLowerCase();
+  const filtered = searchQ ? categoryFiltered.filter((p) => p.name.toLowerCase().includes(searchQ)) : categoryFiltered;
+  const filteredBundles = searchQ ? bundles.filter((b) => b.name.toLowerCase().includes(searchQ)) : bundles;
 
-  function handleAddToCart(items: { variant: ProductVariant; quantity: number }[]) {
+  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number }[]) {
     if (!pickerProduct) return;
-    items.forEach(({ variant, quantity }) => {
+    items.forEach(({ variant, quantity, unitPrice, costPrice }) => {
       const newItem: SaleItem = {
         productId: pickerProduct.id,
         productName: pickerProduct.name,
         variant,
         quantity,
-        originalPrice: pickerProduct.price,
-        unitPrice: pickerProduct.price,
-        costPrice: pickerProduct.costPrice,
+        originalPrice: unitPrice,
+        unitPrice,
+        costPrice,
         needsKitchen: pickerProduct.needsKitchen,
       };
       const key = itemKey(newItem);
@@ -316,11 +358,105 @@ const TakeOrder: React.FC = () => {
         return [...prev, newItem];
       });
     });
-    setCartOpen(true);
+    // Stay on the menu grid instead of popping the cart open — the confirm
+    // button reads "ເພີ່ມຫຼາຍລາຍການ" precisely so staff can keep picking more
+    // items in one go; the floating cart bar (cartCount > 0 && !cartOpen)
+    // already surfaces the running total, and staff open the cart manually
+    // when they're actually done.
   }
 
   function removeCartItem(key: string) {
     setCart((prev) => prev.filter((i) => itemKey(i) !== key));
+  }
+
+  function openBundlePicker(bundle: Bundle) {
+    setBundlePickerTarget(bundle);
+    setChosenVariants({});
+    setBundleQty(1);
+  }
+
+  function isBundleAvailable(bundle: Bundle): boolean {
+    for (const bi of bundle.items) {
+      const p = productsEffective.find((x) => x.id === bi.productId);
+      if (!p) return false;
+      const hasStock = p.trackStock === false || p.variants.some((v) => v.stock >= bi.quantity);
+      if (!hasStock) return false;
+    }
+    return true;
+  }
+
+  const allVariantsChosen = bundlePickerTarget !== null &&
+    bundlePickerTarget.items.every((item, idx) => {
+      const p = productsEffective.find((x) => x.id === item.productId);
+      if (!p) return false;
+      if (p.variants.length === 1) return true;
+      return !!chosenVariants[idx];
+    });
+
+  // Most units of this bundle configuration buildable from what's left in
+  // stock right now (after subtracting what's already reserved in the cart).
+  function computeMaxBundleQty(): number {
+    if (!bundlePickerTarget) return 0;
+    let max = Infinity;
+    bundlePickerTarget.items.forEach((item, idx) => {
+      const p = productsEffective.find((x) => x.id === item.productId);
+      if (p?.trackStock === false) return; // untracked: doesn't constrain the max
+      const autoVariant = p?.variants.length === 1 ? p.variants[0] : null;
+      const chosen = autoVariant ?? chosenVariants[idx] ?? null;
+      const stock = chosen?.stock ?? 0;
+      max = Math.min(max, Math.floor(stock / item.quantity));
+    });
+    return Number.isFinite(max) ? Math.max(0, max) : 0;
+  }
+  const maxBundleQty = computeMaxBundleQty();
+
+  useEffect(() => {
+    setBundleQty((q) => Math.min(Math.max(q, 1), Math.max(maxBundleQty, 1)));
+  }, [maxBundleQty]);
+
+  function confirmBundleToCart() {
+    if (!bundlePickerTarget) return;
+    const bundleItemsWithVariants: BundleItem[] = bundlePickerTarget.items.map((item, idx) => {
+      const p = productsEffective.find((x) => x.id === item.productId);
+      const auto = p?.variants.length === 1 ? p.variants[0] : null;
+      const chosen = auto ?? chosenVariants[idx];
+      return { ...item, variantSize: chosen?.size ?? "", variantColor: chosen?.color ?? "" };
+    });
+    const costPrice = bundleItemsWithVariants.reduce((s, i) => s + (i.costPrice ?? 0) * i.quantity, 0);
+    // Fingerprint the chosen sub-variants into the cart's itemKey so two adds
+    // of the same bundle with DIFFERENT variant picks get separate cart lines.
+    const variantFingerprint = bundleItemsWithVariants
+      .map((bi) => `${bi.productId}:${bi.variantSize ?? ""}:${bi.variantColor ?? ""}`)
+      .join("|");
+    // A single SaleItem can't be split mid-bundle — if ANY component needs
+    // the kitchen, route the whole ticket there.
+    const needsKitchen = bundleItemsWithVariants.some((bi) => {
+      const p = productsEffective.find((x) => x.id === bi.productId);
+      return p?.needsKitchen !== false;
+    });
+    const newItem: SaleItem = {
+      productId: bundlePickerTarget.id,
+      productName: bundlePickerTarget.name,
+      variant: { size: "__bundle__", color: variantFingerprint, stock: 99 },
+      quantity: bundleQty,
+      originalPrice: bundlePickerTarget.price,
+      unitPrice: bundlePickerTarget.price,
+      costPrice: costPrice > 0 ? costPrice : undefined,
+      isBundle: true,
+      bundleItems: bundleItemsWithVariants,
+      needsKitchen,
+    };
+    const key = itemKey(newItem);
+    setCart((prev) => {
+      const existing = prev.find((i) => itemKey(i) === key);
+      if (existing) {
+        return prev.map((i) => (itemKey(i) === key ? { ...i, quantity: i.quantity + bundleQty } : i));
+      }
+      return [...prev, newItem];
+    });
+    // Same reasoning as handleAddToCart above — stay on the menu instead of
+    // popping the cart open, so multiple bundles/items can be added in a row.
+    setBundlePickerTarget(null);
   }
 
   const cartTotal = cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
@@ -333,6 +469,7 @@ const TakeOrder: React.FC = () => {
     try {
       const session = await getOrCreateOpenSession(shopId, tableLabel.trim());
       await createOrder(shopId, cart, session.id, session.tableLabel, user.uid, displayName);
+      setTableSession(session);
       setCart([]);
       setCartOpen(false);
       await load();
@@ -342,6 +479,23 @@ const TakeOrder: React.FC = () => {
       setSending(false);
     }
   }
+
+  const loadHistory = useCallback(async () => {
+    if (!shopId || !tableSession) { setHistoryOrders([]); return; }
+    setHistoryLoading(true);
+    try {
+      const orders = await getOrdersBySession(shopId, tableSession.id);
+      setHistoryOrders([...orders].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [shopId, tableSession]);
+
+  useEffect(() => {
+    // Also re-fires when the cart modal is (re)opened while already on the
+    // history tab, so it doesn't show stale data from an earlier visit.
+    if (cartOpen && orderView === "history") loadHistory();
+  }, [cartOpen, orderView, loadHistory]);
 
   async function handleShowQr(label: string) {
     if (!shopId || !label.trim()) return;
@@ -594,11 +748,6 @@ const TakeOrder: React.FC = () => {
             </IonButton>
           </IonButtons>
           <IonTitle>ໂຕະ {tableLabel}</IonTitle>
-          <IonButtons slot="end">
-            <IonButton disabled={qrBusy} onClick={() => handleShowQr(tableLabel)}>
-              {qrBusy ? <IonSpinner name="dots" style={{ width: 18, height: 18 }} /> : <IonIcon slot="icon-only" icon={qrCodeOutline} />}
-            </IonButton>
-          </IonButtons>
         </IonToolbar>
       </IonHeader>
 
@@ -607,48 +756,94 @@ const TakeOrder: React.FC = () => {
           <IonRefresherContent />
         </IonRefresher>
 
-        {categories.length > 0 && (
-          <div style={{
-            display: "flex", gap: 8, overflowX: "auto", padding: "10px 12px 6px", scrollbarWidth: "none",
-            position: "sticky", top: 0, zIndex: 5, background: "var(--ion-background-color)",
-          }}>
-            {["all", ...categories].map((cat) => {
-              const isActive = activeCategory === cat;
+        {/* Sticky: both the type tab row (ເມນູທົ່ວໄປ/ຊຸດ/ໂປຣໂມຊັນ) and the
+            category chips below it stay put together while the grid
+            scrolls — a single sticky wrapper so they stick as one unit
+            instead of the category row alone sticking to the very top and
+            covering the type row as it scrolls out of flow. */}
+        <div style={{ position: "sticky", top: 0, zIndex: 5, background: "var(--ion-background-color)" }}>
+          <div style={{ padding: "10px 12px 0" }}>
+            <IonSearchbar
+              value={menuSearch}
+              onIonInput={(e) => setMenuSearch(e.detail.value ?? "")}
+              placeholder="ຄົ້ນຫາເມນູ"
+              style={{ padding: 0 }}
+            />
+          </div>
+
+          {/* Tab: ເມນູທົ່ວໄປ / ຊຸດ / ໂປຣໂມຊັນ */}
+          <div style={{ display: "flex", padding: "10px 12px 4px", gap: 8 }}>
+            {(["regular", "bundle", "promotion"] as const).map((tab) => {
+              const active = menuTab === tab;
               return (
                 <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
+                  key={tab}
+                  onClick={() => { setMenuTab(tab); setActiveCategory("all"); }}
                   style={{
-                    flexShrink: 0, padding: "7px 18px", borderRadius: 24,
-                    border: `1.5px solid ${isActive ? "var(--ion-color-primary)" : "var(--ion-color-step-150, var(--app-border))"}`,
-                    background: isActive ? "var(--ion-color-primary)" : "var(--ion-item-background, #ffffff)",
-                    color: isActive ? "#ffffff" : "var(--ion-text-color, var(--app-text-secondary))",
-                    fontSize: "0.85rem", fontWeight: 700, cursor: "pointer",
-                    boxShadow: isActive ? "0 2px 8px rgba(224,123,57,0.3)" : "none",
-                    transition: "all 0.15s",
+                    padding: "7px 16px", borderRadius: 24, fontWeight: 700, fontSize: "0.82rem",
+                    cursor: "pointer", transition: "all 0.15s",
+                    border: `1.5px solid ${active ? "var(--ion-color-primary)" : "var(--ion-color-step-150, var(--app-border))"}`,
+                    background: active ? "var(--ion-color-primary)" : "var(--ion-item-background, #ffffff)",
+                    color: active ? "#ffffff" : "var(--ion-text-color, var(--app-text-secondary))",
+                    boxShadow: active ? "0 2px 8px rgba(224,123,57,0.3)" : "none",
                   }}
                 >
-                  {cat === "all" ? "ທັງໝົດ" : cat}
+                  {tab === "regular" ? "ເມນູທົ່ວໄປ" : tab === "bundle" ? "🎁 ຊຸດ" : "🏷️ ໂປຣໂມຊັນ"}
                 </button>
               );
             })}
           </div>
-        )}
+
+          {menuTab !== "bundle" && categories.length > 0 && (
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "6px 12px 6px", scrollbarWidth: "none" }}>
+              {["all", ...categories].map((cat) => {
+                const isActive = activeCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setActiveCategory(cat)}
+                    style={{
+                      flexShrink: 0, padding: "7px 18px", borderRadius: 24,
+                      border: `1.5px solid ${isActive ? "var(--ion-color-primary)" : "var(--ion-color-step-150, var(--app-border))"}`,
+                      background: isActive ? "var(--ion-color-primary)" : "var(--ion-item-background, #ffffff)",
+                      color: isActive ? "#ffffff" : "var(--ion-text-color, var(--app-text-secondary))",
+                      fontSize: "0.85rem", fontWeight: 700, cursor: "pointer",
+                      boxShadow: isActive ? "0 2px 8px rgba(224,123,57,0.3)" : "none",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {cat === "all" ? "ທັງໝົດ" : cat}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {loading && (
           <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
             <IonSpinner name="crescent" color="primary" />
           </div>
         )}
-        {!loading && products.length === 0 && <EmptyState icon="🍽️" title="ຍັງບໍ່ມີເມນູ" />}
-        {!loading && products.length > 0 && filtered.length === 0 && <EmptyState icon="🔍" title="ບໍ່ມີເມນູໃນໝວດນີ້" />}
 
-        {!loading && filtered.length > 0 && (
+        {/* ── ເມນູທົ່ວໄປ / ໂປຣໂມຊັນ tabs ── */}
+        {menuTab !== "bundle" && !loading && typeFiltered.length === 0 && (
+          <EmptyState icon={menuTab === "promotion" ? "🏷️" : "🍽️"} title={menuTab === "promotion" ? "ຍັງບໍ່ມີໂປຣໂມຊັນ" : "ຍັງບໍ່ມີເມນູ"} />
+        )}
+        {menuTab !== "bundle" && !loading && typeFiltered.length > 0 && filtered.length === 0 && (
+          <EmptyState icon="🔍" title={searchQ ? "ບໍ່ພົບເມນູທີ່ຄົ້ນຫາ" : "ບໍ່ມີເມນູໃນໝວດນີ້"} />
+        )}
+
+        {menuTab !== "bundle" && !loading && filtered.length > 0 && (
           <IonGrid style={{ padding: "12px 8px" }}>
             <IonRow>
               {filtered.map((p) => {
+                const tracked = p.trackStock !== false;
                 const totalStock = p.variants.reduce((s, v) => s + v.stock, 0);
-                const outOfStock = totalStock === 0;
+                const outOfStock = tracked && totalStock === 0;
+                const prices = p.variants.map((v) => v.price ?? p.price ?? 0);
+                const minP = Math.min(...prices);
+                const maxP = Math.max(...prices);
                 return (
                   <IonCol key={p.id} size="6" sizeMd="4" sizeLg="3" style={{ padding: 6 }}>
                     <button
@@ -666,6 +861,8 @@ const TakeOrder: React.FC = () => {
                       <div style={{ fontSize: 38, marginBottom: 6, lineHeight: 1 }}>
                         {p.photoUrl
                           ? <img src={p.photoUrl} alt={p.name} loading="lazy" decoding="async" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
+                          : p.color
+                          ? <div style={{ width: 44, height: 44, borderRadius: 8, background: p.color }} />
                           : "🍽️"
                         }
                       </div>
@@ -673,16 +870,76 @@ const TakeOrder: React.FC = () => {
                         {p.name}
                       </div>
                       <div style={{ fontWeight: 800, fontSize: "1rem", color: "var(--ion-color-primary)", marginBottom: 4 }}>
-                        {fmtK(p.price)} ກີບ
+                        {minP === maxP ? `${fmtK(minP)} ກີບ` : `${fmtK(minP)}–${fmtK(maxP)} ກີບ`}
                       </div>
                       <div style={{
                         display: "inline-block", fontSize: "0.72rem", fontWeight: 600,
                         padding: "2px 8px", borderRadius: 20,
-                        background: outOfStock ? "rgba(220,38,38,0.12)" : "rgba(22,163,74,0.12)",
-                        color: outOfStock ? "var(--app-danger)" : "var(--app-success)",
+                        background: !tracked ? "rgba(107,114,128,0.12)" : outOfStock ? "rgba(220,38,38,0.12)" : "rgba(22,163,74,0.12)",
+                        color: !tracked ? "var(--app-text-muted)" : outOfStock ? "var(--app-danger)" : "var(--app-success)",
                       }}>
-                        {outOfStock ? "ໝົດ" : `${totalStock} ຈານ`}
+                        {!tracked ? "ບໍ່ຈຳກັດ" : outOfStock ? "ໝົດ" : `${totalStock} ຈານ`}
                       </div>
+                    </button>
+                  </IonCol>
+                );
+              })}
+            </IonRow>
+          </IonGrid>
+        )}
+
+        {/* ── ຊຸດ (bundle) tab ── */}
+        {menuTab === "bundle" && !loading && bundles.length === 0 && (
+          <EmptyState icon="🎁" title="ຍັງບໍ່ມີຊຸດ — ສ້າງໄດ້ທີ່ໜ້າເມນູ" />
+        )}
+        {menuTab === "bundle" && !loading && bundles.length > 0 && filteredBundles.length === 0 && (
+          <EmptyState icon="🔍" title="ບໍ່ພົບຊຸດທີ່ຄົ້ນຫາ" />
+        )}
+        {menuTab === "bundle" && !loading && filteredBundles.length > 0 && (
+          <IonGrid style={{ padding: "12px 8px" }}>
+            <IonRow>
+              {filteredBundles.map((b) => {
+                const available = isBundleAvailable(b);
+                return (
+                  <IonCol key={b.id} size="6" sizeMd="4" sizeLg="3" style={{ padding: 6 }}>
+                    <button
+                      disabled={!available}
+                      onClick={() => openBundlePicker(b)}
+                      style={{
+                        width: "100%", minHeight: 140, borderRadius: 16, border: "none",
+                        background: !available ? "var(--ion-color-step-50, #f5f5f4)" : "var(--ion-item-background, #ffffff)",
+                        boxShadow: !available ? "none" : "0 3px 14px rgba(224,123,57,0.14)",
+                        padding: "14px 12px",
+                        cursor: !available ? "not-allowed" : "pointer",
+                        opacity: !available ? 0.55 : 1, textAlign: "left",
+                        transition: "box-shadow 0.1s",
+                      }}
+                    >
+                      <div style={{ fontSize: 34, marginBottom: 6, lineHeight: 1 }}>
+                        {b.photoUrl
+                          ? <img src={b.photoUrl} alt={b.name} loading="lazy" decoding="async" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
+                          : "🎁"
+                        }
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color)", marginBottom: 3, lineHeight: 1.3 }}>
+                        {b.name}
+                      </div>
+                      <div style={{ fontWeight: 800, fontSize: "1rem", color: "var(--ion-color-primary)", marginBottom: 4 }}>
+                        {fmtK(b.price)} ກີບ
+                      </div>
+                      <div style={{ fontSize: "0.68rem", color: "var(--app-text-secondary)", lineHeight: 1.4 }}>
+                        {b.items.map((i) => `${i.productName} ×${i.quantity}`).join(" + ")}
+                      </div>
+                      {!available && (
+                        <div style={{
+                          display: "inline-block", marginTop: 4,
+                          fontSize: "0.68rem", fontWeight: 700,
+                          padding: "2px 8px", borderRadius: 20,
+                          background: "var(--app-danger-surface)", color: "var(--app-danger)",
+                        }}>
+                          ເມນູໝົດ
+                        </div>
+                      )}
                     </button>
                   </IonCol>
                 );
@@ -692,7 +949,141 @@ const TakeOrder: React.FC = () => {
         )}
       </IonContent>
 
-      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct} onAdd={handleAddToCart} onDismiss={() => setPickerProduct(null)} />
+      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct} onAdd={handleAddToCart} onDismiss={() => setPickerProduct(null)} confirmLabel="ເພີ່ມຫຼາຍລາຍການ" />
+
+      {/* ── Bundle variant picker ── */}
+      <IonModal
+        isOpen={!!bundlePickerTarget}
+        onDidDismiss={() => setBundlePickerTarget(null)}
+        initialBreakpoint={1}
+        breakpoints={[0, 1]}
+      >
+        <IonHeader>
+          <IonToolbar>
+            <IonTitle style={{ fontSize: "1rem" }}>🎁 {bundlePickerTarget?.name}</IonTitle>
+            <IonButtons slot="end">
+              <IonButton onClick={() => setBundlePickerTarget(null)}>ປິດ</IonButton>
+            </IonButtons>
+          </IonToolbar>
+        </IonHeader>
+
+        <IonContent>
+          <div style={{ padding: "8px 16px 24px" }}>
+            <p style={{ margin: "0 0 16px", fontSize: "0.78rem", color: "var(--app-text-secondary)" }}>
+              ເລືອກ variant ໃຫ້ແຕ່ລະເມນູໃນຊຸດ
+            </p>
+            {bundlePickerTarget?.items.map((item, idx) => {
+              const p = productsEffective.find((x) => x.id === item.productId);
+              const autoVariant = p?.variants.length === 1 ? p.variants[0] : null;
+              const chosen = autoVariant ?? chosenVariants[idx] ?? null;
+              return (
+                <div key={idx} style={{ marginBottom: 20 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color)" }}>
+                      {item.productName} ×{item.quantity}
+                    </span>
+                    {chosen && (
+                      <span style={{ fontSize: "0.78rem", color: "var(--ion-color-primary)", fontWeight: 700 }}>
+                        {chosen.size}{chosen.color ? ` / ${chosen.color}` : ""}
+                      </span>
+                    )}
+                  </div>
+                  {autoVariant ? (
+                    <div style={{
+                      fontSize: "0.78rem", color: "var(--app-text-secondary)", padding: "8px 12px",
+                      background: "var(--app-success-surface)", borderRadius: 8, border: "1px solid #bbf7d0",
+                    }}>
+                      ✓ {autoVariant.size}{autoVariant.color ? ` / ${autoVariant.color}` : ""} (ອັດຕະໂນມັດ)
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {p?.variants.map((v, vi) => {
+                        const isChosen = chosenVariants[idx]?.size === v.size && chosenVariants[idx]?.color === v.color;
+                        const outOfStock = p.trackStock !== false && v.stock < item.quantity * bundleQty;
+                        return (
+                          <button
+                            key={vi}
+                            disabled={outOfStock}
+                            onClick={() => setChosenVariants((prev) => ({ ...prev, [idx]: v }))}
+                            style={{
+                              padding: "7px 14px", borderRadius: 20,
+                              cursor: outOfStock ? "not-allowed" : "pointer",
+                              border: `1.5px solid ${isChosen ? "var(--ion-color-primary)" : "var(--ion-color-step-150, var(--app-border))"}`,
+                              background: isChosen ? "var(--ion-color-primary)" : outOfStock ? "var(--ion-color-step-50, #f5f5f4)" : "var(--ion-item-background, #fff)",
+                              color: isChosen ? "#fff" : outOfStock ? "var(--ion-color-medium, var(--app-text-muted))" : "var(--ion-text-color, var(--ion-text-color))",
+                              fontWeight: 600, fontSize: "0.85rem",
+                              display: "flex", alignItems: "center", gap: 4,
+                            }}
+                          >
+                            {isChosen && <IonIcon icon={checkmarkOutline} style={{ fontSize: 14 }} />}
+                            {v.size}{v.color ? `/${v.color}` : ""}
+                            <span style={{ fontSize: "0.7rem", opacity: 0.7 }}>
+                              {p.trackStock === false ? "" : outOfStock ? " ໝົດ" : ` (${v.stock})`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </IonContent>
+
+        <IonFooter>
+          <div style={{ padding: "12px 16px 28px", background: "var(--ion-item-background, #fff)", borderTop: "1px solid var(--ion-color-step-150, var(--app-border))" }}>
+            {allVariantsChosen && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--ion-text-color)" }}>
+                  ຈຳນວນຊຸດ {maxBundleQty > 0 && <span style={{ color: "var(--app-text-secondary)", fontWeight: 400 }}>(ເຫຼືອເຮັດໄດ້ {maxBundleQty} ຊຸດ)</span>}
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <button
+                    onClick={() => setBundleQty((q) => Math.max(1, q - 1))}
+                    disabled={bundleQty <= 1}
+                    style={{
+                      width: 36, height: 36, borderRadius: 10,
+                      border: "1.5px solid var(--ion-color-step-150, var(--app-border))",
+                      background: bundleQty <= 1 ? "var(--ion-color-step-50, #f5f5f4)" : "var(--ion-item-background, #fff)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: bundleQty <= 1 ? "not-allowed" : "pointer",
+                      color: bundleQty <= 1 ? "var(--ion-color-step-300, #d4d4d0)" : "var(--ion-text-color)",
+                    }}
+                  >
+                    <IonIcon icon={removeOutline} style={{ fontSize: 18 }} />
+                  </button>
+                  <span style={{ minWidth: 28, textAlign: "center", fontSize: "1.1rem", fontWeight: 700, color: "var(--ion-color-primary)" }}>
+                    {bundleQty}
+                  </span>
+                  <button
+                    onClick={() => setBundleQty((q) => Math.min(maxBundleQty, q + 1))}
+                    disabled={bundleQty >= maxBundleQty}
+                    style={{
+                      width: 36, height: 36, borderRadius: 10,
+                      border: `1.5px solid ${bundleQty >= maxBundleQty ? "var(--ion-color-step-150, var(--app-border))" : "var(--ion-color-primary)"}`,
+                      background: bundleQty >= maxBundleQty ? "var(--ion-color-step-50, #f5f5f4)" : "var(--ion-color-primary)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: bundleQty >= maxBundleQty ? "not-allowed" : "pointer",
+                      color: bundleQty >= maxBundleQty ? "#d4d4d0" : "#fff",
+                    }}
+                  >
+                    <IonIcon icon={addOutline} style={{ fontSize: 18 }} />
+                  </button>
+                </div>
+              </div>
+            )}
+            <IonButton
+              expand="block"
+              disabled={!allVariantsChosen || maxBundleQty === 0}
+              onClick={confirmBundleToCart}
+              style={{ minHeight: 52, "--border-radius": "14px" }}
+            >
+              {!allVariantsChosen ? "ເລືອກ variant ໃຫ້ຄົບກ່ອນ" : maxBundleQty === 0 ? "ເມນູໝົດ" : `ເພີ່ມໃສ່ອໍເດີ້ · ${fmtK((bundlePickerTarget?.price ?? 0) * bundleQty)} ກີບ`}
+            </IonButton>
+          </div>
+        </IonFooter>
+      </IonModal>
 
       {cartCount > 0 && !cartOpen && (
         <div style={{ position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 20 }}>
@@ -720,6 +1111,30 @@ const TakeOrder: React.FC = () => {
           </IonToolbar>
         </IonHeader>
         <IonContent>
+          {/* ເພີ່ມໃໝ່ (what's staged, not sent yet) vs ປະຫວັດການສັ່ງ (tickets
+              already confirmed/sent for this table) */}
+          <div style={{ display: "flex", padding: "12px 16px 0", gap: 8 }}>
+            {(["new", "history"] as const).map((v) => {
+              const active = orderView === v;
+              return (
+                <button
+                  key={v}
+                  onClick={() => setOrderView(v)}
+                  style={{
+                    flex: 1, padding: "9px 0", borderRadius: 10, fontWeight: 700, fontSize: "0.86rem",
+                    cursor: "pointer", transition: "all 0.15s",
+                    border: `1.5px solid ${active ? "var(--ion-color-primary)" : "var(--ion-color-step-150, var(--app-border))"}`,
+                    background: active ? "var(--ion-color-primary)" : "var(--ion-item-background, #ffffff)",
+                    color: active ? "#ffffff" : "var(--ion-text-color, var(--app-text-secondary))",
+                  }}
+                >
+                  {v === "new" ? "ເພີ່ມໃໝ່" : "ປະຫວັດການສັ່ງ"}
+                </button>
+              );
+            })}
+          </div>
+
+          {orderView === "new" && (
           <div style={{ padding: "12px 16px" }}>
             {cart.length === 0 ? (
               <EmptyState icon="🧾" title="ຍັງບໍ່ມີລາຍການ" />
@@ -728,9 +1143,19 @@ const TakeOrder: React.FC = () => {
               return (
                 <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--app-border)" }}>
                   <div>
-                    <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color)" }}>{item.productName} ×{item.quantity}</p>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color)", display: "flex", alignItems: "center", gap: 6 }}>
+                      {item.productName} ×{item.quantity}
+                      {item.isBundle && (
+                        <span style={{ fontSize: "0.62rem", fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: "var(--app-accent-surface)", color: "var(--ion-color-primary)" }}>
+                          ຊຸດ
+                        </span>
+                      )}
+                    </p>
                     <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--app-text-secondary)" }}>
-                      {item.variant.size}{item.variant.color ? ` / ${item.variant.color}` : ""} — {fmtK(item.unitPrice * item.quantity)} ກີບ
+                      {item.isBundle
+                        ? (item.bundleItems ?? []).map((bi) => `${bi.productName}${bi.variantSize ? ` (${bi.variantSize}${bi.variantColor ? `/${bi.variantColor}` : ""})` : ""}`).join(", ")
+                        : `${item.variant.size}${item.variant.color ? ` / ${item.variant.color}` : ""}`
+                      } — {fmtK(item.unitPrice * item.quantity)} ກີບ
                     </p>
                   </div>
                   <button onClick={() => removeCartItem(key)} style={{ background: "none", border: "none", color: "var(--app-danger)", cursor: "pointer", minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -742,6 +1167,59 @@ const TakeOrder: React.FC = () => {
 
             {error && <p style={{ color: "var(--app-danger)", fontSize: "0.85rem", marginTop: 12 }}>{error}</p>}
           </div>
+          )}
+
+          {orderView === "history" && (
+            <div style={{ padding: "12px 16px 28px" }}>
+              {historyLoading && (
+                <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
+                  <IonSpinner name="crescent" color="primary" />
+                </div>
+              )}
+              {!historyLoading && historyOrders.length === 0 && (
+                <EmptyState icon="🧾" title="ຍັງບໍ່ມີປະຫວັດການສັ່ງ" subtitle="ອໍເດີ້ທີ່ຢືນຢັນຈັດຕຽມແລ້ວຈະສະແດງຢູ່ນີ້" />
+              )}
+              {!historyLoading && historyOrders.map((o) => {
+                const cfg = ORDER_STATUS_LABEL[o.status];
+                const qty = o.items.reduce((s, i) => s + i.quantity, 0);
+                return (
+                  <div key={o.id} style={{
+                    border: "1px solid var(--app-border)", borderRadius: 12, padding: "12px 14px", marginBottom: 10,
+                    background: "var(--app-surface)",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span style={{
+                        fontSize: "0.72rem", fontWeight: 700, padding: "3px 10px", borderRadius: 20,
+                        color: cfg.color, background: cfg.bg,
+                      }}>
+                        {cfg.text}
+                      </span>
+                      <span style={{ fontSize: "0.72rem", color: "var(--app-text-secondary)" }}>
+                        {o.createdAt.toLocaleTimeString("lo-LA", { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    {o.items.map((it, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: "0.85rem" }}>
+                        <span style={{ color: "var(--ion-text-color)" }}>
+                          {it.productName}
+                          {!it.isBundle && it.variant.size ? ` (${it.variant.size}${it.variant.color ? `/${it.variant.color}` : ""})` : ""}
+                          {" "}×{it.quantity}
+                        </span>
+                        <span style={{ color: "var(--app-text-secondary)", fontWeight: 600 }}>{fmtK(it.unitPrice * it.quantity)}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--app-border)" }}>
+                      <span style={{ fontSize: "0.8rem", color: "var(--app-text-secondary)" }}>ລວມ {qty} ລາຍການ</span>
+                      <span style={{ fontSize: "0.9rem", fontWeight: 800, color: "var(--ion-color-primary)" }}>{fmtK(o.total)} ກີບ</span>
+                    </div>
+                    {o.status === "cancelled" && o.cancelReason && (
+                      <p style={{ margin: "8px 0 0", fontSize: "0.75rem", color: "var(--app-danger)" }}>ເຫດຜົນ: {o.cancelReason}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </IonContent>
         <IonFooter>
           <div style={{ padding: "12px 16px 28px", background: "var(--ion-item-background, #fff)", borderTop: "1px solid var(--app-border)" }}>
@@ -771,41 +1249,6 @@ const TakeOrder: React.FC = () => {
             </div>
           </div>
         </IonFooter>
-      </IonModal>
-
-      {/* QR for this table — customer scans to keep ordering from their own phone */}
-      <IonModal isOpen={qrOpen} onDidDismiss={() => setQrOpen(false)} initialBreakpoint={0.55} breakpoints={[0, 0.55, 1]}>
-        <style>{`
-          @media print {
-            body * { visibility: hidden; }
-            #qr-print-area, #qr-print-area * { visibility: visible; }
-            #qr-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
-          }
-        `}</style>
-        <IonHeader className="ion-no-print">
-          <IonToolbar>
-            <IonTitle style={{ fontSize: "1rem" }}>QR ໂຕະ {qrTableLabel}</IonTitle>
-            <IonButtons slot="end">
-              <IonButton onClick={() => setQrOpen(false)}>ປິດ</IonButton>
-            </IonButtons>
-          </IonToolbar>
-        </IonHeader>
-        <IonContent>
-          <div id="qr-print-area" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 16px" }}>
-            <p style={{ margin: "0 0 12px", fontWeight: 800, fontSize: "1.1rem" }}>ໂຕະ {qrTableLabel}</p>
-            {qrDataUrl && <img src={qrDataUrl} alt="QR" style={{ width: 240, height: 240, borderRadius: 12, border: "1px solid var(--app-border)" }} />}
-            <p style={{ marginTop: 16, fontSize: "0.82rem", color: "var(--app-text-secondary)", textAlign: "center" }}>
-              ໃຫ້ລູກຄ້າສະແກນເພື່ອສັ່ງເມນູເພີ່ມເອງໄດ້ຈາກມືຖື
-            </p>
-            <IonButton
-              className="ion-no-print" fill="outline" expand="block" onClick={() => window.print()}
-              style={{ "--border-radius": "10px", marginTop: 16, width: "100%" }}
-            >
-              <IonIcon slot="start" icon={printOutline} />
-              ພິມ QR
-            </IonButton>
-          </div>
-        </IonContent>
       </IonModal>
     </IonPage>
   );

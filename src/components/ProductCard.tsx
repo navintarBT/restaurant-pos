@@ -20,12 +20,20 @@ interface Props {
 }
 
 const ProductCard: React.FC<Props> = ({ product, isAdmin, canDelete, canViewFinance, onEdit, onDelete, onDetail, onRestock }) => {
+  const tracked = product.trackStock !== false;
   const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
-  const outOfStock = totalStock === 0;
+  const outOfStock = tracked && totalStock === 0;
+  const reorderPoint = product.reorderPoint ?? 5;
+
+  const prices = product.variants.map((v) => v.price ?? product.price ?? 0);
+  const costs = product.variants.map((v) => v.costPrice ?? product.costPrice ?? 0);
+  const [minP, maxP] = [Math.min(...prices), Math.max(...prices)];
+  const [minC, maxC] = [Math.min(...costs), Math.max(...costs)];
+  const uniformPricing = minP === maxP && minC === maxC;
 
   return (
     <IonCard style={{ margin: 0, borderRadius: 16, overflow: "hidden" }}>
-      {/* Image / placeholder — tap to view detail */}
+      {/* Image / color / placeholder — tap to view detail */}
       <div onClick={() => onDetail(product)} style={{ cursor: "pointer" }}>
         {product.photoUrl ? (
           <img
@@ -35,6 +43,8 @@ const ProductCard: React.FC<Props> = ({ product, isAdmin, canDelete, canViewFina
             decoding="async"
             style={{ width: "100%", height: 130, objectFit: "cover", display: "block" }}
           />
+        ) : product.color ? (
+          <div style={{ height: 100, background: product.color }} />
         ) : (
           <div style={{
             height: 100,
@@ -54,19 +64,19 @@ const ProductCard: React.FC<Props> = ({ product, isAdmin, canDelete, canViewFina
           {product.name}
         </p>
         <p style={{ margin: "0 0 2px", fontWeight: 800, fontSize: "1.1rem", color: "var(--ion-color-primary)" }}>
-          {fmtK(product.price)} ກີບ
+          {minP === maxP ? `${fmtK(minP)} ກີບ` : `${fmtK(minP)}–${fmtK(maxP)} ກີບ`}
         </p>
-        {canViewFinance && product.costPrice != null && product.costPrice > 0 && (
+        {canViewFinance && uniformPricing && minC > 0 && (
           <p style={{ margin: "0 0 6px", fontSize: "0.72rem", color: "var(--app-success)", fontWeight: 600 }}>
-            ກຳໄລ {fmtK(product.price - product.costPrice)} ກີບ
+            ກຳໄລ {fmtK(minP - minC)} ກີບ
           </p>
         )}
 
         {/* Variants — compact tags, fixed 2-row height so all cards align */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8, minHeight: 39, alignContent: "flex-start" }}>
           {product.variants.slice(0, 4).map((v, i) => {
-            const empty = v.stock === 0;
-            const low = !empty && v.stock <= (v.minStock ?? 5);
+            const empty = tracked && v.stock === 0;
+            const low = tracked && !empty && v.stock <= reorderPoint;
             return (
               <span
                 key={i}
@@ -82,7 +92,7 @@ const ProductCard: React.FC<Props> = ({ product, isAdmin, canDelete, canViewFina
                   color: empty ? "var(--ion-color-medium, #9ca3af)" : low ? "var(--app-warning)" : "var(--app-success)",
                 }}
               >
-                {v.size}/{v.color}
+                {v.size}{v.color ? `/${v.color}` : ""}
               </span>
             );
           })}
@@ -103,7 +113,7 @@ const ProductCard: React.FC<Props> = ({ product, isAdmin, canDelete, canViewFina
             color: outOfStock ? "var(--app-danger)" : "var(--app-text-secondary)",
             fontWeight: outOfStock ? 700 : 400,
           }}>
-            {outOfStock ? "⚠ ໝົດສະຕ໋ອກ" : `ສະຕ໋ອກລວມ: ${totalStock}`}
+            {!tracked ? "ບໍ່ຕິດຕາມສະຕ໋ອກ" : outOfStock ? "⚠ ໝົດສະຕ໋ອກ" : `ສະຕ໋ອກລວມ: ${totalStock}`}
           </span>
 
           {isAdmin && (

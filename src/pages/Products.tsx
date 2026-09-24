@@ -19,7 +19,7 @@ import {
   IonButton,
   IonMenuButton,
 } from "@ionic/react";
-import { addOutline, cubeOutline, returnUpBackOutline } from "ionicons/icons";
+import { addOutline, cubeOutline } from "ionicons/icons";
 import { useAuth } from "../context/AuthContext";
 import { getProducts, addProduct, updateProduct, deleteProduct } from "../data/productRepository";
 import { getCategories } from "../data/categoryRepository";
@@ -28,7 +28,6 @@ import ProductForm from "../components/ProductForm";
 import InventoryReportSheet from "../components/InventoryReportSheet";
 import ProductDetailSheet from "../components/ProductDetailSheet";
 import BundleManager from "../components/BundleManager";
-import ReturnForm from "../components/ReturnForm";
 import RestockModal from "../components/RestockModal";
 import ShopHeaderTag from "../components/ShopHeaderTag";
 import EmptyState from "../components/EmptyState";
@@ -40,7 +39,7 @@ interface Props {
 }
 
 const Products: React.FC<Props> = ({ onStockChanged }) => {
-  const { shopId, role, permissions, features } = useAuth();
+  const { shopId, role, permissions } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,11 +48,11 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
-  const [returnOpen, setReturnOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const [restockTarget, setRestockTarget] = useState<Product | null>(null);
   const [activeCategory, setActiveCategory] = useState("all");
   const [productTab, setProductTab] = useState<"retail" | "bundle">("retail");
+  const [bundleCreateSignal, setBundleCreateSignal] = useState(0);
 
   const isAdmin = permissions.canManageProducts;
   const isOwner = role === "customer";
@@ -165,7 +164,7 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         )}
 
         {productTab === "bundle" ? (
-          shopId && <BundleManager products={products} shopId={shopId} isOwner={isOwner} />
+          shopId && <BundleManager products={products} shopId={shopId} isOwner={isOwner} autoOpenCreateSignal={bundleCreateSignal} />
         ) : (
         <>
         {loading && (
@@ -225,20 +224,11 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         )}
 
         {isAdmin && (
-          <>
-            {features.returnEnabled && (
-              <IonFab vertical="bottom" horizontal="start" slot="fixed">
-                <IonFabButton color="medium" onClick={() => setReturnOpen(true)}>
-                  <IonIcon icon={returnUpBackOutline} />
-                </IonFabButton>
-              </IonFab>
-            )}
-            <IonFab vertical="bottom" horizontal="end" slot="fixed">
-              <IonFabButton onClick={openAdd}>
-                <IonIcon icon={addOutline} />
-              </IonFabButton>
-            </IonFab>
-          </>
+          <IonFab vertical="bottom" horizontal="end" slot="fixed">
+            <IonFabButton onClick={openAdd}>
+              <IonIcon icon={addOutline} />
+            </IonFabButton>
+          </IonFab>
         )}
         </>
         )}
@@ -278,25 +268,16 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         isOwner={isOwner}
         onSave={handleSave}
         onDismiss={() => setFormOpen(false)}
+        onRequestBundle={() => {
+          setFormOpen(false);
+          setProductTab("bundle");
+          setBundleCreateSignal((n) => n + 1);
+        }}
         onCategoryChanged={(cats) => setCategories(cats)}
         onCategoryRenamed={(oldName, newName) =>
           setProducts((prev) => prev.map((p) => p.category === oldName ? { ...p, category: newName } : p))
         }
       />
-
-      {shopId && (
-        <ReturnForm
-          isOpen={returnOpen}
-          products={products}
-          shopId={shopId}
-          onDismiss={() => setReturnOpen(false)}
-          onSaved={(updated) => {
-            setProducts((prev) => prev.map((p) => p.id === updated.id ? updated : p));
-            onStockChanged?.();
-          }}
-        />
-      )}
-
 
       <IonAlert
         isOpen={!!deleteError}
