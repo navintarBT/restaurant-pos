@@ -33,7 +33,7 @@ interface Props {
 
 const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss }) => {
   const { items, total, addItem, setQty, setPrice, splitPrice, removeItem, itemKey } = useCart();
-  const { permissions } = useAuth();
+  const { permissions, shopId } = useAuth();
 
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [priceEditItem, setPriceEditItem] = useState<SaleItem | null>(null);
@@ -69,9 +69,9 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
     setGiftPickerOpen(true);
   }
 
-  function handleAddGift(picked: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number }[]) {
+  function handleAddGift(picked: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number; selectedFlavors?: string[]; selectedToppings?: string[] }[]) {
     if (!giftVariantProduct || !giftForKey) return;
-    picked.forEach(({ variant, quantity, unitPrice, costPrice }) => {
+    picked.forEach(({ variant, quantity, unitPrice, costPrice, selectedFlavors, selectedToppings }) => {
       addItem({
         productId: giftVariantProduct.id,
         productName: giftVariantProduct.name,
@@ -82,6 +82,10 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
         costPrice,
         isGift: true,
         giftForKey,
+        // Firestore rejects `undefined` field values outright — only attach
+        // these when something was actually picked.
+        ...(selectedFlavors ? { selectedFlavors } : {}),
+        ...(selectedToppings ? { selectedToppings } : {}),
       });
     });
   }
@@ -221,7 +225,7 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
                           }}>🎁 ຂອງແຖມ</span>
                         )}
                       </h3>
-                      {(item.isBundle || variantLabel) && (
+                      {(item.isBundle || variantLabel || item.selectedFlavors?.length || item.selectedToppings?.length) && (
                         <p style={{ fontSize: "0.78rem", color: "var(--app-text-secondary)" }}>
                           {item.isBundle
                             ? (item.bundleItems ?? []).map((bi) => {
@@ -229,6 +233,8 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
                                 return `${bi.productName}${v ? ` (${v})` : ""} ×${bi.quantity}`;
                               }).join(" + ")
                             : variantLabel}
+                          {item.selectedFlavors?.length ? ` · ${item.selectedFlavors.join("+")}` : ""}
+                          {item.selectedToppings?.length ? ` · ${item.selectedToppings.join(", ")}` : ""}
                         </p>
                       )}
                       <p style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -644,6 +650,7 @@ const CartSheet: React.FC<Props> = ({ isOpen, products, onCheckout, onDismiss })
       <VariantPicker
         product={giftVariantProduct}
         isOpen={!!giftVariantProduct}
+        shopId={shopId ?? undefined}
         onAdd={handleAddGift}
         onDismiss={() => setGiftVariantProduct(null)}
       />

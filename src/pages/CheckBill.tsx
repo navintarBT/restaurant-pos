@@ -60,7 +60,9 @@ const CheckBill: React.FC = () => {
       const rosterByLabel = new Map(roster.map((r) => [tableDisplayLabel(r.label, r.zone), r]));
       const withOrders = await Promise.all(
         sessions.map(async (session) => {
-          const orders = await getOrdersBySession(shopId, session.id);
+          // A cancelled ticket was voided, not served — it shouldn't count
+          // toward what the table owes, or get marked "paid" when the bill closes.
+          const orders = (await getOrdersBySession(shopId, session.id)).filter((o) => o.status !== "cancelled");
           const subtotal = orders.reduce((s, o) => s + o.total, 0);
           const chargeApplies = serviceChargeSettings.enabled && !!rosterByLabel.get(session.tableLabel)?.serviceCharge;
           const serviceChargePercent = chargeApplies ? serviceChargeSettings.percent : 0;

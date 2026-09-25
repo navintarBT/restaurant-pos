@@ -20,9 +20,10 @@ export interface ReturnRecord {
 
 export interface ProductVariant {
   size: string;
-  // Flavor name (from Product.flavors) when Product.hasFlavors is true;
-  // otherwise "" — was previously a freeform "option" text field (spice
-  // level / no-ice / etc.), see the flavor-auto-migration note on Product.
+  // LEGACY — freeform "option" text (spice level / no-ice / etc.) from
+  // before the dedicated flavor/topping systems existed. No longer written
+  // by ProductForm (always ""); flavor does NOT split price/stock per
+  // flavor — one shared price/stock per size, see Product.hasFlavors.
   color: string;
   stock: number;
   // LEGACY — superseded by Product.reorderPoint (one value per product
@@ -59,11 +60,11 @@ export interface Product {
   needsKitchen?: boolean;
   // Product code / SKU, freeform.
   code?: string;
-  // Absent/"regular" = a normal menu item; "promotion" = tagged as a promo.
-  // "bundle"/set items are never represented here — picking that option in
-  // ProductForm redirects into the separate Bundle system (BundleManager.tsx)
-  // instead of persisting onto a Product doc.
-  productType?: "regular" | "promotion";
+  // Absent/"regular" = a normal menu item; "promotion" = tagged as a promo;
+  // "bundle" = tagged as a set/combo item — a plain classification tag, not
+  // a link to the separate Bundle/BundleItem system (BundleManager.tsx),
+  // which still exists independently for multi-item combos.
+  productType?: "regular" | "bundle" | "promotion";
   // From the shop's reusable Units list (getUnits/setUnits).
   unit?: string;
   // Low-stock threshold, one value for the whole product (replaces the old
@@ -73,10 +74,15 @@ export interface Product {
   // alerts; explicitly false = excluded regardless of actual stock levels.
   alertEnabled?: boolean;
   // Product-scoped flavor system (distinct from the shop-wide Toppings
-  // list). When true, each variant's `color` is picked from `flavors`
-  // instead of typed freeform.
+  // list) — a capped multi-select the customer picks from `flavors` at
+  // order time; one shared price/stock per size regardless of which (or how
+  // many) flavors are picked — flavor never splits the variant grid.
+  // maxFlavors undefined/0 defaults to 1 (pick exactly one) when read.
+  // Selecting flavors at order time is not wired up yet — this only stores
+  // the product's configuration (mirrors hasToppings/toppingNames below).
   hasFlavors?: boolean;
   flavors?: string[];
+  maxFlavors?: number;
   // Absent/true = normal stock deduction on sale (today's behavior).
   // Explicitly false = this product's stock is never validated or deducted
   // at sale time, regardless of the quantity sold or each variant's `stock`
@@ -126,6 +132,13 @@ export interface SaleItem {
   // costPrice) so createOrder can split a cart into kitchen/direct tickets
   // without an extra product lookup.
   needsKitchen?: boolean;
+  // Picked in VariantPicker.tsx when Product.hasFlavors/hasToppings is on —
+  // applies uniformly to this whole line (flavor/topping never split
+  // price/stock, see Product.hasFlavors); topping price add-ons are already
+  // folded into `unitPrice`. Two lines of the same variant with different
+  // picks stay separate cart lines (see each page's itemKey).
+  selectedFlavors?: string[];
+  selectedToppings?: string[];
 }
 
 export interface TableSession {

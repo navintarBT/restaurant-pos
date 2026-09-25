@@ -8,14 +8,16 @@ import { addOutline, trashOutline, chevronDownOutline, checkmarkOutline, closeOu
 import type { Product, ProductVariant, Category } from "../data/types";
 import { uploadProductImage } from "../data/imageRepository";
 import { addCategory, updateCategory, deleteCategory, isCategoryInUse, renameCategoryInProducts } from "../data/categoryRepository";
-import { getUnits, getToppings, getColors, type ToppingEntry } from "../data/shopRepository";
+import { getUnits, getToppings, getColors, getSizes, getFlavors, type ToppingEntry } from "../data/shopRepository";
+import { getProducts } from "../data/productRepository";
 import ImagePicker from "./ImagePicker";
 import ColorPicker from "./ColorPicker";
 import NumInput from "./NumInput";
 import ProductVariantRow from "./ProductVariantRow";
-import FlavorEditor from "./FlavorEditor";
 import UnitPickerSheet from "./UnitPickerSheet";
 import ToppingPickerSheet from "./ToppingPickerSheet";
+import SizePickerSheet from "./SizePickerSheet";
+import FlavorPickerSheet from "./FlavorPickerSheet";
 
 interface Props {
   isOpen: boolean;
@@ -27,10 +29,6 @@ interface Props {
   onDismiss: () => void;
   onCategoryChanged?: (cats: Category[]) => void;
   onCategoryRenamed?: (oldName: string, newName: string) => void;
-  // Called (and the form dismissed) when the user picks "ຊຸດອາຫານ ຫຼື
-  // ຊຸດເມນູ" in the product-type selector — bundles live in a separate
-  // system (BundleManager.tsx), so this form never persists one.
-  onRequestBundle?: () => void;
 }
 
 interface FormErrors {
@@ -43,18 +41,29 @@ interface FormErrors {
 
 const emptyVariant = (): ProductVariant => ({ size: "", color: "", stock: 0, price: 0, costPrice: 0, status: "active" });
 
-function variantErrorMsg(v: ProductVariant, hasFlavors: boolean): string {
+function variantErrorMsg(v: ProductVariant): string {
   const missing: string[] = [];
   if (!v.size.trim()) missing.push("ຂະໜາດ");
-  if (hasFlavors && !v.color.trim()) missing.push("ລົດຊາດ");
   if ((v.price ?? 0) <= 0) missing.push("ລາຄາຂາຍ");
   if ((v.costPrice ?? 0) <= 0) missing.push("ລາຄາຕົ້ນທຶນ");
   return missing.length ? `ຕ້ອງໃສ່ ${missing.join(", ")}` : "";
 }
 
+// Next sequential "P0001", "P0002", ... code — based on the highest existing
+// code matching that pattern, not the product count, so a deleted product
+// never frees up its old number for reuse.
+function nextProductCode(existing: Product[]): string {
+  let max = 0;
+  for (const p of existing) {
+    const m = /^P(\d+)$/.exec(p.code ?? "");
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `P${String(max + 1).padStart(4, "0")}`;
+}
+
 const ProductForm: React.FC<Props> = ({
   isOpen, product, categories, shopId, isOwner = false, onSave, onDismiss,
-  onCategoryChanged, onCategoryRenamed, onRequestBundle,
+  onCategoryChanged, onCategoryRenamed,
 }) => {
   // ── Section 1: ກຳນົດຮູບສິນຄ້າ ──
   const [imageMode, setImageMode] = useState<"photo" | "color">("photo");
@@ -63,9 +72,10 @@ const ProductForm: React.FC<Props> = ({
   const [uploading, setUploading] = useState(false);
   const [color, setColor] = useState("#e07b39");
   const [savedColors, setSavedColors] = useState<string[]>([]);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
 
   // ── Section 2: ກຳນົດຮູບແບບການຂາຍ ──
-  const [productType, setProductType] = useState<"regular" | "promotion">("regular");
+  const [productType, setProductType] = useState<"regular" | "bundle" | "promotion">("regular");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
@@ -79,10 +89,19 @@ const ProductForm: React.FC<Props> = ({
 
   // ── Section 3: ລົດຊາດ ──
   const [hasFlavors, setHasFlavors] = useState(false);
+  // Subset of the shop-wide flavor list (shopFlavors) offered for THIS
+  // product — same reuse-a-shared-list pattern as toppings.
   const [flavors, setFlavors] = useState<string[]>([]);
+  const [maxFlavors, setMaxFlavors] = useState(1);
+  const [shopFlavors, setShopFlavors] = useState<string[]>([]);
+  const [flavorPickerOpen, setFlavorPickerOpen] = useState(false);
 
   // ── Section 4: ລາຍລະອຽດ ແລະ ລາຄາ ──
   const [variants, setVariants] = useState<ProductVariant[]>([emptyVariant()]);
+  const [shopSizes, setShopSizes] = useState<string[]>([]);
+  // Which variant row is currently picking a size (index into `variants`),
+  // or null when the sheet is closed.
+  const [sizePickerRowIndex, setSizePickerRowIndex] = useState<number | null>(null);
 
   // ── Section 5: ກຳນົດການຕັດສະຕັອກ ──
   const [trackStock, setTrackStock] = useState(true);
@@ -132,7 +151,13 @@ const ProductForm: React.FC<Props> = ({
       // Auto-migrate legacy freeform variant "option" text into the flavor
       // system on first open, instead of defaulting hasFlavors to false and
       // silently discarding it (color was a freeform spice-level/no-ice
-      // field before flavors existed — see ProductVariant.color).
+      // field before flavors existed — see ProductVariant.color). Flavor no
+      // longer lives on the variant at all, so this only seeds the
+      // product's selected-flavor subset — the migrated variants' own
+      // `color` gets blanked below (vArr) since it no longer carries any
+      // meaning. Migrated names that aren't yet in the shop-wide flavor list
+      // (loaded separately below) simply won't show as checkable rows in
+      // FlavorPickerSheet until re-picked — a rare legacy-data edge case.
       if (product && product.hasFlavors === undefined && product.variants.some((v) => v.color?.trim())) {
         setHasFlavors(true);
         setFlavors([...new Set(product.variants.map((v) => v.color).filter((c) => c && c.trim()))]);
@@ -140,6 +165,7 @@ const ProductForm: React.FC<Props> = ({
         setHasFlavors(product?.hasFlavors ?? false);
         setFlavors(product?.flavors ?? []);
       }
+      setMaxFlavors(product?.maxFlavors || 1);
 
       setTrackStock(product?.trackStock ?? true);
 
@@ -150,6 +176,9 @@ const ProductForm: React.FC<Props> = ({
       const vArr = product?.variants.length
         ? product.variants.map((v) => ({
             ...v,
+            // Flavor never lives on the variant (see note above) — blank any
+            // legacy/stale value so it can't masquerade as a real dimension.
+            color: "",
             price: v.price ?? product.price ?? 0,
             costPrice: v.costPrice ?? product.costPrice ?? 0,
             status: v.status ?? "active",
@@ -165,11 +194,25 @@ const ProductForm: React.FC<Props> = ({
       getUnits(shopId).then(setShopUnits).catch(() => {});
       getToppings(shopId).then(setShopToppings).catch(() => {});
       getColors(shopId).then(setSavedColors).catch(() => {});
+      getSizes(shopId).then(setShopSizes).catch(() => {});
+      getFlavors(shopId).then(setShopFlavors).catch(() => {});
+      // New product only — an edited product keeps its existing code
+      // (already set from `product.code` in the effect above).
+      if (!product) {
+        getProducts(shopId).then((all) => setCode(nextProductCode(all))).catch(() => {});
+      }
     }
-  }, [isOpen, shopId]);
+  }, [isOpen, shopId, product]);
 
   function updateVariant(index: number, field: keyof ProductVariant, value: string | number) {
     setVariants((prev) => prev.map((v, i) => (i === index ? { ...v, [field]: value } : v)));
+  }
+
+  // Shared by ProductVariantRow's onChange and SizePickerSheet's onPick, so
+  // picking a size clears the row's invalid state exactly like typing would.
+  function handleVariantFieldChange(index: number, field: keyof ProductVariant, value: string | number) {
+    updateVariant(index, field, value);
+    if (errors.badVariants?.has(index)) clearFieldError("variantsMsg");
   }
 
   function addVariant() {
@@ -186,16 +229,12 @@ const ProductForm: React.FC<Props> = ({
     });
   }
 
-  function toggleHasFlavors(next: boolean) {
-    setHasFlavors(next);
-    // Blank stale "option" text when flavors are turned off — otherwise two
-    // rows showing the same size could secretly differ by a leftover color
-    // value, since (size,color) is the variant-matching key everywhere else.
-    if (!next) setVariants((prev) => prev.map((v) => ({ ...v, color: "" })));
-  }
-
   function toggleTopping(name: string) {
     setToppingNames((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+  }
+
+  function toggleFlavor(name: string) {
+    setFlavors((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
   }
 
   function clearFieldError(field: keyof FormErrors) {
@@ -268,15 +307,6 @@ const ProductForm: React.FC<Props> = ({
     }
   }
 
-  function pickProductType(next: "regular" | "promotion" | "bundle") {
-    if (next === "bundle") {
-      onRequestBundle?.();
-      onDismiss();
-      return;
-    }
-    setProductType(next);
-  }
-
   async function handleSave() {
     const newErrors: FormErrors = {};
 
@@ -287,14 +317,14 @@ const ProductForm: React.FC<Props> = ({
       newErrors.flavorsMsg = "ຕ້ອງມີຢ່າງໜ້ອຍ 1 ລົດຊາດ, ຫຼືປິດການໃຊ້ງານລົດຊາດ";
     }
 
-    // Validate each variant row: size (+ flavor if enabled) + price + cost
+    // Validate each variant row: size + price + cost (flavor never lives on
+    // the variant — see Product.hasFlavors/maxFlavors)
     const badIdxs = new Set<number>();
     variants.forEach((v, i) => {
       const sizeOk = !!v.size.trim();
-      const colorOk = hasFlavors ? !!v.color.trim() : true;
       const priceOk = (v.price ?? 0) > 0;
       const costOk = (v.costPrice ?? 0) > 0;
-      if (!sizeOk || !colorOk || !priceOk || !costOk) badIdxs.add(i);
+      if (!sizeOk || !priceOk || !costOk) badIdxs.add(i);
     });
     const validVariants = variants.filter((_, i) => !badIdxs.has(i));
 
@@ -307,9 +337,9 @@ const ProductForm: React.FC<Props> = ({
     } else {
       const seen = new Set<string>();
       for (const v of validVariants) {
-        const key = `${v.size.trim().toLowerCase()}|${v.color.trim().toLowerCase()}`;
+        const key = v.size.trim().toLowerCase();
         if (seen.has(key)) {
-          newErrors.variantsMsg = `ມີ variant ຊ້ຳ: "${v.size}${v.color ? ` / ${v.color}` : ""}" — ກະລຸນາປ່ຽນ`;
+          newErrors.variantsMsg = `ມີ variant ຊ້ຳ: "${v.size}" — ກະລຸນາປ່ຽນ`;
           break;
         }
         seen.add(key);
@@ -342,7 +372,7 @@ const ProductForm: React.FC<Props> = ({
 
       const finalVariants = validVariants.map((v) => ({
         size: v.size.trim(),
-        color: hasFlavors ? v.color.trim() : "",
+        color: "",
         stock: Number(v.stock) || 0,
         price: Number(v.price) || 0,
         costPrice: Number(v.costPrice) || 0,
@@ -374,6 +404,7 @@ const ProductForm: React.FC<Props> = ({
       if (code.trim()) payload.code = code.trim();
       if (unit.trim()) payload.unit = unit.trim();
       if (hasFlavors && flavors.length > 0) payload.flavors = flavors;
+      if (hasFlavors && maxFlavors > 1) payload.maxFlavors = maxFlavors;
       if (hasToppings && toppingNames.length > 0) payload.toppingNames = toppingNames;
       if (hasToppings && maxToppings) payload.maxToppings = maxToppings;
 
@@ -468,14 +499,30 @@ const ProductForm: React.FC<Props> = ({
             onRemove={() => { setPhotoUrl(undefined); setPendingDataUrl(null); }}
           />
         ) : (
-          <ColorPicker value={color} onChange={setColor} savedColors={savedColors} />
+          <div
+            onClick={() => setColorPickerOpen(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 12, padding: "10px 14px",
+              borderRadius: 10, cursor: "pointer",
+              border: "1.5px solid var(--app-border)", background: "var(--app-surface)",
+            }}
+          >
+            <div style={{
+              width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+              background: color, border: "1.5px solid var(--app-border)",
+            }} />
+            <span style={{ flex: 1, fontFamily: "monospace", fontSize: "0.92rem", fontWeight: 700, textTransform: "uppercase", color: "var(--ion-text-color)" }}>
+              {color}
+            </span>
+            <IonIcon icon={chevronDownOutline} style={{ color: "var(--app-text-muted)", fontSize: 18 }} />
+          </div>
         )}
 
         {/* ── Section 2: ກຳນົດຮູບແບບການຂາຍ ── */}
         <p style={sectionHeader("")}>ກຳນົດຮູບແບບການຂາຍ</p>
         <IonSegment
           value={productType}
-          onIonChange={(e) => pickProductType(e.detail.value as "regular" | "promotion" | "bundle")}
+          onIonChange={(e) => setProductType(e.detail.value as "regular" | "bundle" | "promotion")}
           style={{ marginBottom: 8 }}
         >
           <IonSegmentButton value="regular"><IonLabel style={{ fontSize: "0.76rem" }}>ສິນຄ້າທົ່ວໄປ</IonLabel></IonSegmentButton>
@@ -528,11 +575,20 @@ const ProductForm: React.FC<Props> = ({
 
         {/* ── Section 3: ລົດຊາດ ── */}
         <p style={sectionHeader("")}>ລົດຊາດ</p>
-        {toggleCard(hasFlavors, "ມີລົດຊາດໃຫ້ເລືອກ", "ເຊັ່ນ: ເຜັດ/ບໍ່ເຜັດ, ຫວານ/ບໍ່ຫວານ — ແຕ່ລະ variant ຈະຕ້ອງເລືອກລົດຊາດ", () => toggleHasFlavors(!hasFlavors))}
+        {toggleCard(hasFlavors, "ມີລົດຊາດໃຫ້ເລືອກ", "ເຊັ່ນ: ເຜັດ/ບໍ່ເຜັດ, ຫວານ/ບໍ່ຫວານ — ລູກຄ້າເລືອກຕອນສັ່ງ, ລາຄາ/ສະຕັອກໃຊ້ຮ່ວມກັນ ບໍ່ແຍກຕາມລົດຊາດ", () => setHasFlavors((v) => !v))}
         {hasFlavors && (
           <div style={{ marginTop: 8 }}>
-            <FlavorEditor flavors={flavors} onChange={setFlavors} />
+            <IonItem button detail={false} onClick={() => setFlavorPickerOpen(true)} lines="full">
+              <IonLabel position="stacked">ລົດຊາດທີ່ມີໃຫ້ (ເລືອກໄດ້ຫຼາຍລາຍການ)</IonLabel>
+              <div style={{ padding: "8px 0", color: flavors.length ? "var(--ion-text-color)" : "var(--app-text-muted)", fontSize: "0.92rem" }}>
+                {flavors.length > 0 ? flavors.join(", ") : "ກົດເພື່ອເລືອກ/ຈັດການລົດຊາດ"}
+              </div>
+            </IonItem>
             {errors.flavorsMsg && <p style={errText}>{errors.flavorsMsg}</p>}
+            <IonItem lines="none" style={{ marginTop: 8, "--padding-start": "0" }}>
+              <IonLabel position="stacked">ເລືອກໄດ້ຈຳນວນລົດຊາດ (ຕໍ່ 1 ລາຍການ)</IonLabel>
+              <NumInput value={maxFlavors} onChange={(n) => setMaxFlavors(Math.max(1, n))} placeholder="1" style={inputBase} />
+            </IonItem>
           </div>
         )}
 
@@ -548,20 +604,15 @@ const ProductForm: React.FC<Props> = ({
             key={i}
             variant={v}
             index={i}
-            hasFlavors={hasFlavors}
-            flavors={flavors}
             trackStock={trackStock}
             invalid={{
               size: errors.badVariants?.has(i) && !v.size.trim(),
-              color: errors.badVariants?.has(i) && hasFlavors && !v.color.trim(),
             }}
-            errorMsg={errors.badVariants?.has(i) ? variantErrorMsg(v, hasFlavors) : undefined}
+            errorMsg={errors.badVariants?.has(i) ? variantErrorMsg(v) : undefined}
             canDelete={variants.length > 1}
-            onChange={(field, value) => {
-              updateVariant(i, field, value);
-              if (errors.badVariants?.has(i)) clearFieldError("variantsMsg");
-            }}
+            onChange={(field, value) => handleVariantFieldChange(i, field, value)}
             onDelete={() => setDeleteVariantIdx(i)}
+            onOpenSizePicker={() => setSizePickerRowIndex(i)}
           />
         ))}
 
@@ -647,7 +698,7 @@ const ProductForm: React.FC<Props> = ({
       header="ລຶບ Variant"
       message={(() => {
         const v = variants[deleteVariantIdx ?? -1];
-        const label = v && (v.size.trim() || v.color.trim()) ? `${v.size}${v.color ? ` / ${v.color}` : ""}` : `ລາຍການທີ ${(deleteVariantIdx ?? 0) + 1}`;
+        const label = v && v.size.trim() ? v.size : `ລາຍການທີ ${(deleteVariantIdx ?? 0) + 1}`;
         return `ຕ້ອງການລຶບ "${label}" ແມ່ນບໍ່?`;
       })()}
       buttons={[
@@ -760,6 +811,40 @@ const ProductForm: React.FC<Props> = ({
       onToppingsChanged={setShopToppings}
       onDismiss={() => setToppingPickerOpen(false)}
     />
+
+    <SizePickerSheet
+      isOpen={sizePickerRowIndex !== null}
+      shopId={shopId}
+      sizes={shopSizes}
+      value={sizePickerRowIndex !== null ? variants[sizePickerRowIndex]?.size ?? "" : ""}
+      onPick={(size) => { if (sizePickerRowIndex !== null) handleVariantFieldChange(sizePickerRowIndex, "size", size); }}
+      onSizesChanged={setShopSizes}
+      onDismiss={() => setSizePickerRowIndex(null)}
+    />
+
+    <FlavorPickerSheet
+      isOpen={flavorPickerOpen}
+      shopId={shopId}
+      flavors={shopFlavors}
+      selectedNames={flavors}
+      onToggleSelect={toggleFlavor}
+      onFlavorsChanged={setShopFlavors}
+      onDismiss={() => setFlavorPickerOpen(false)}
+    />
+
+    <IonModal isOpen={colorPickerOpen} onDidDismiss={() => setColorPickerOpen(false)} initialBreakpoint={0.75} breakpoints={[0, 0.75, 1]}>
+      <IonHeader>
+        <IonToolbar>
+          <IonTitle style={{ fontSize: "1rem" }}>ເລືອກສີ</IonTitle>
+          <IonButtons slot="end">
+            <IonButton onClick={() => setColorPickerOpen(false)}>ຕົກລົງ</IonButton>
+          </IonButtons>
+        </IonToolbar>
+      </IonHeader>
+      <IonContent className="ion-padding">
+        <ColorPicker value={color} onChange={setColor} savedColors={savedColors} />
+      </IonContent>
+    </IonModal>
     </>
   );
 };

@@ -192,6 +192,21 @@ export async function setSizes(shopId: string, sizes: string[]): Promise<void> {
   });
 }
 
+/** Reusable flavor names (e.g. ["ເຜັດ","ບໍ່ເຜັດ","ຫວານ"]) shared across the
+ * shop's menu — a product opts a subset of these in (Product.flavors),
+ * gated the same as toppings/units/sizes. */
+export async function getFlavors(shopId: string): Promise<string[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.flavors as string[] | undefined) ?? [];
+}
+
+export async function setFlavors(shopId: string, flavors: string[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    flavors,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 /** Reusable color swatches (hex, e.g. "#e07b39") for menu item variants —
  * menu-configuration, gated the same as toppings/units/sizes. */
 export async function getColors(shopId: string): Promise<string[]> {

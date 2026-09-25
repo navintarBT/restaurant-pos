@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   IonModal,
   IonHeader,
@@ -9,9 +9,11 @@ import {
   IonContent,
   IonFooter,
   IonIcon,
+  IonCheckbox,
 } from "@ionic/react";
-import { addOutline, removeOutline } from "ionicons/icons";
+import { addOutline, removeOutline, checkmarkOutline } from "ionicons/icons";
 import type { Product, ProductVariant } from "../data/types";
+import { getToppings, type ToppingEntry } from "../data/shopRepository";
 import { fmtK } from "../utils/format";
 
 interface PickedItem {
@@ -19,11 +21,14 @@ interface PickedItem {
   quantity: number;
   unitPrice: number;
   costPrice?: number;
+  selectedFlavors?: string[];
+  selectedToppings?: string[];
 }
 
 interface Props {
   product: Product | null;
   isOpen: boolean;
+  shopId?: string;
   onAdd: (items: PickedItem[]) => void;
   onDismiss: () => void;
   // Text on the confirm button once at least 1 item is picked — defaults to
@@ -41,11 +46,43 @@ function variantPrice(v: ProductVariant, product: Product): number {
   return v.price ?? product.price ?? 0;
 }
 
-const VariantPicker: React.FC<Props> = ({ product, isOpen, onAdd, onDismiss, confirmLabel = "ເພີ່ມໃສ່ກະຕ່າ" }) => {
+const VariantPicker: React.FC<Props> = ({ product, isOpen, shopId, onAdd, onDismiss, confirmLabel = "ເພີ່ມໃສ່ກະຕ່າ" }) => {
   const [qtys, setQtys] = useState<Record<string, number>>({});
+  const [selectedFlavors, setSelectedFlavors] = useState<string[]>([]);
+  const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
+  const [shopToppings, setShopToppings] = useState<ToppingEntry[]>([]);
 
   function handleOpen() {
     setQtys({});
+    setSelectedFlavors([]);
+    setSelectedToppings([]);
+  }
+
+  useEffect(() => {
+    if (isOpen && shopId && product?.hasToppings) {
+      getToppings(shopId).then(setShopToppings).catch(() => {});
+    }
+  }, [isOpen, shopId, product?.hasToppings]);
+
+  function toggleFlavor(name: string) {
+    if (!product) return;
+    const max = product.maxFlavors || 1;
+    setSelectedFlavors((prev) => {
+      if (prev.includes(name)) return prev.filter((n) => n !== name);
+      if (max === 1) return [name]; // single-pick: replaces, not adds
+      if (prev.length >= max) return prev; // multi-pick: cap reached, ignore
+      return [...prev, name];
+    });
+  }
+
+  function toggleTopping(name: string) {
+    if (!product) return;
+    const max = product.maxToppings;
+    setSelectedToppings((prev) => {
+      if (prev.includes(name)) return prev.filter((n) => n !== name);
+      if (max && prev.length >= max) return prev;
+      return [...prev, name];
+    });
   }
 
   function setQty(v: ProductVariant, delta: number, cap: number) {
@@ -63,8 +100,10 @@ const VariantPicker: React.FC<Props> = ({ product, isOpen, onAdd, onDismiss, con
       .map((v) => ({
         variant: v,
         quantity: qtys[variantKey(v)],
-        unitPrice: variantPrice(v, product),
+        unitPrice: variantPrice(v, product) + toppingSurcharge,
         costPrice: v.costPrice ?? product.costPrice,
+        selectedFlavors: product.hasFlavors ? selectedFlavors : undefined,
+        selectedToppings: product.hasToppings && selectedToppings.length > 0 ? selectedToppings : undefined,
       }));
     if (items.length === 0) return;
     onAdd(items);
@@ -77,12 +116,21 @@ const VariantPicker: React.FC<Props> = ({ product, isOpen, onAdd, onDismiss, con
   // Variants marked inactive (item 16) aren't orderable at all.
   const sellable = product.variants.filter((v) => v.status !== "inactive");
 
+  const toppingSurcharge = selectedToppings.reduce(
+    (s, name) => s + (shopToppings.find((t) => t.name === name)?.price ?? 0), 0
+  );
+
   const totalQty = Object.values(qtys).reduce((s, q) => s + q, 0);
-  const totalPrice = sellable.reduce((s, v) => s + (qtys[variantKey(v)] ?? 0) * variantPrice(v, product), 0);
+  const totalPrice = sellable.reduce((s, v) => s + (qtys[variantKey(v)] ?? 0) * (variantPrice(v, product) + toppingSurcharge), 0);
 
   const prices = sellable.map((v) => variantPrice(v, product));
   const minP = prices.length ? Math.min(...prices) : 0;
   const maxP = prices.length ? Math.max(...prices) : 0;
+
+  // Only actually blocking if there's something to pick — "hasFlavors: true"
+  // with an empty flavors list would otherwise permanently disable Add with
+  // no visible section to satisfy it.
+  const flavorsMissing = !!product.hasFlavors && (product.flavors?.length ?? 0) > 0 && selectedFlavors.length === 0;
 
   return (
     <IonModal
@@ -110,6 +158,79 @@ const VariantPicker: React.FC<Props> = ({ product, isOpen, onAdd, onDismiss, con
             ເລືອກໄດ້ຫຼາຍ variant
           </span>
         </div>
+
+        {/* ── Flavor (required, capped at product.maxFlavors, default 1) ── */}
+        {product.hasFlavors && product.flavors && product.flavors.length > 0 && (
+          <div style={{ padding: "8px 16px 4px" }}>
+            <p style={{ margin: "0 0 8px", fontSize: "0.82rem", fontWeight: 700, color: "var(--ion-text-color)" }}>
+              ລົດຊາດ * {(product.maxFlavors || 1) > 1 && (
+                <span style={{ fontWeight: 400, color: "var(--app-text-secondary)" }}>
+                  (ເລືອກໄດ້ {selectedFlavors.length}/{product.maxFlavors})
+                </span>
+              )}
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {product.flavors.map((f) => {
+                const active = selectedFlavors.includes(f);
+                const disabled = !active && (product.maxFlavors || 1) > 1 && selectedFlavors.length >= (product.maxFlavors || 1);
+                return (
+                  <button
+                    key={f}
+                    disabled={disabled}
+                    onClick={() => toggleFlavor(f)}
+                    style={{
+                      padding: "8px 16px", borderRadius: 20, fontSize: "0.85rem", fontWeight: 700,
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      border: `1.5px solid ${active ? "var(--ion-color-primary)" : "var(--app-border)"}`,
+                      background: active ? "var(--ion-color-primary)" : disabled ? "var(--ion-color-step-50, #f5f5f4)" : "var(--ion-item-background, #fff)",
+                      color: active ? "#fff" : disabled ? "var(--ion-color-step-300, #d4d4d0)" : "var(--ion-text-color)",
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}
+                  >
+                    {active && <IonIcon icon={checkmarkOutline} style={{ fontSize: 14 }} />}
+                    {f}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Toppings (optional, capped at product.maxToppings, undefined = unlimited) ── */}
+        {product.hasToppings && product.toppingNames && product.toppingNames.length > 0 && (
+          <div style={{ padding: "8px 16px 4px" }}>
+            <p style={{ margin: "0 0 8px", fontSize: "0.82rem", fontWeight: 700, color: "var(--ion-text-color)" }}>
+              ທັອບປິ້ງ {product.maxToppings && (
+                <span style={{ fontWeight: 400, color: "var(--app-text-secondary)" }}>
+                  (ເລືອກໄດ້ {selectedToppings.length}/{product.maxToppings})
+                </span>
+              )}
+            </p>
+            {product.toppingNames.map((name) => {
+              const entry = shopToppings.find((t) => t.name === name);
+              const active = selectedToppings.includes(name);
+              const disabled = !active && !!product.maxToppings && selectedToppings.length >= product.maxToppings;
+              return (
+                <div
+                  key={name}
+                  onClick={() => { if (!disabled) toggleTopping(name); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10,
+                    marginBottom: 6, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
+                    border: `1.5px solid ${active ? "var(--ion-color-primary)" : "var(--app-border)"}`,
+                    background: active ? "var(--app-accent-surface)" : "var(--ion-item-background, #fff)",
+                  }}
+                >
+                  <IonCheckbox checked={active} disabled={disabled} onIonChange={() => toggleTopping(name)} onClick={(e) => e.stopPropagation()} />
+                  <span style={{ flex: 1, fontSize: "0.88rem", fontWeight: 600, color: "var(--ion-text-color)" }}>{name}</span>
+                  {entry?.price != null && entry.price > 0 && (
+                    <span style={{ fontSize: "0.78rem", color: "var(--app-text-secondary)", fontWeight: 700 }}>+{fmtK(entry.price)} ກີບ</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         <div style={{ padding: "8px 16px 16px" }}>
           {sellable.map((v, i) => {
@@ -249,9 +370,14 @@ const VariantPicker: React.FC<Props> = ({ product, isOpen, onAdd, onDismiss, con
               </span>
             </div>
           )}
+          {flavorsMissing && totalQty > 0 && (
+            <p style={{ margin: "0 0 10px", fontSize: "0.78rem", fontWeight: 600, color: "var(--app-danger)" }}>
+              ⚠ ກະລຸນາເລືອກລົດຊາດ
+            </p>
+          )}
           <IonButton
             expand="block"
-            disabled={totalQty === 0}
+            disabled={totalQty === 0 || flavorsMissing}
             onClick={handleAdd}
             style={{ minHeight: 52, "--border-radius": "14px" }}
           >

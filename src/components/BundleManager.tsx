@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   IonModal, IonHeader, IonToolbar, IonTitle, IonContent, IonFooter,
   IonButtons, IonButton, IonIcon, IonSpinner, IonAlert, IonInput, IonLabel,
@@ -21,13 +21,9 @@ interface Props {
   products: Product[];
   shopId: string;
   isOwner?: boolean;
-  // Bumped by Products.tsx when ProductForm's type-selector redirects into
-  // bundle creation (see ProductForm's onRequestBundle) — jumps straight
-  // into the create form instead of the bundle list.
-  autoOpenCreateSignal?: number;
 }
 
-const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false, autoOpenCreateSignal }) => {
+const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false }) => {
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,17 +54,6 @@ const BundleManager: React.FC<Props> = ({ products, shopId, isOwner = false, aut
   }, [shopId]);
 
   useEffect(() => { load(); }, [load]);
-
-  // Guard against firing on mount — only open when the signal actually
-  // changes to a new value (a fresh redirect request from ProductForm).
-  const lastSignal = useRef(autoOpenCreateSignal);
-  useEffect(() => {
-    if (autoOpenCreateSignal !== undefined && autoOpenCreateSignal !== lastSignal.current) {
-      lastSignal.current = autoOpenCreateSignal;
-      openCreate();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoOpenCreateSignal]);
 
   function openCreate() {
     setEditingId(null);

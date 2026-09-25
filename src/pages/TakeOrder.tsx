@@ -27,17 +27,19 @@ import { fmtK } from "../utils/format";
 import { useAuth } from "../context/AuthContext";
 import { getProducts } from "../data/productRepository";
 import { getBundles } from "../data/bundleRepository";
-import { createOrder, getOrdersBySession } from "../data/saleRepository";
+import { createOrder, getOrdersBySession, closeBill } from "../data/saleRepository";
 import { getOrCreateOpenSession, getOpenSessions, closeSession } from "../data/tableSessionRepository";
-import { getTableRoster, tableDisplayLabel, type TableRosterEntry } from "../data/shopRepository";
+import { getTableRoster, tableDisplayLabel, getServiceChargeSettings, type TableRosterEntry, type ServiceChargeSettings } from "../data/shopRepository";
 import { computeReserved, reservedKey } from "../utils/stock";
 import VariantPicker from "../components/VariantPicker";
 import ShopHeaderTag from "../components/ShopHeaderTag";
 import EmptyState from "../components/EmptyState";
-import type { Bundle, BundleItem, OrderStatus, Product, ProductVariant, Sale, SaleItem, TableSession } from "../data/types";
+import type { Bundle, BundleItem, OrderStatus, PaymentType, Product, ProductVariant, Sale, SaleItem, TableSession } from "../data/types";
 
-function itemKey(item: Pick<SaleItem, "productId" | "variant">) {
-  return `${item.productId}__${item.variant.size}__${item.variant.color}`;
+function itemKey(item: Pick<SaleItem, "productId" | "variant" | "selectedFlavors" | "selectedToppings">) {
+  const flavorPart = (item.selectedFlavors ?? []).slice().sort().join(",");
+  const toppingPart = (item.selectedToppings ?? []).slice().sort().join(",");
+  return `${item.productId}__${item.variant.size}__${item.variant.color}__${flavorPart}__${toppingPart}`;
 }
 
 type TableStatus = "available" | "empty" | "busy" | "ready" | "served";
@@ -122,6 +124,11 @@ const TakeOrder: React.FC = () => {
   const [tableSession, setTableSession] = useState<TableSession | null>(null);
   const [historyOrders, setHistoryOrders] = useState<Sale[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // ປິດບິນ (close/check the bill) from right inside the history tab — same
+  // computation + payment flow as CheckBill.tsx, just scoped to this table.
+  const [serviceChargeSettings, setServiceChargeSettings] = useState<ServiceChargeSettings>({ enabled: false, percent: 0 });
+  const [payBusy, setPayBusy] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrBusy, setQrBusy] = useState(false);
@@ -291,12 +298,14 @@ const TakeOrder: React.FC = () => {
     if (!shopId) return;
     setLoading(true);
     try {
-      const [prods, bunds] = await Promise.all([
+      const [prods, bunds, sc] = await Promise.all([
         getProducts(shopId),
         getBundles(shopId).catch(() => [] as Bundle[]),
+        getServiceChargeSettings(shopId).catch(() => ({ enabled: false, percent: 0 })),
       ]);
       setProducts(prods);
       setBundles(bunds);
+      setServiceChargeSettings(sc);
     } finally {
       setLoading(false);
     }
@@ -336,18 +345,21 @@ const TakeOrder: React.FC = () => {
   const filtered = searchQ ? categoryFiltered.filter((p) => p.name.toLowerCase().includes(searchQ)) : categoryFiltered;
   const filteredBundles = searchQ ? bundles.filter((b) => b.name.toLowerCase().includes(searchQ)) : bundles;
 
-  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number }[]) {
-    if (!pickerProduct) return;
-    items.forEach(({ variant, quantity, unitPrice, costPrice }) => {
+  function addItemsToCart(product: Product, items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number; selectedFlavors?: string[]; selectedToppings?: string[] }[]) {
+    items.forEach(({ variant, quantity, unitPrice, costPrice, selectedFlavors, selectedToppings }) => {
       const newItem: SaleItem = {
-        productId: pickerProduct.id,
-        productName: pickerProduct.name,
+        productId: product.id,
+        productName: product.name,
         variant,
         quantity,
         originalPrice: unitPrice,
         unitPrice,
         costPrice,
-        needsKitchen: pickerProduct.needsKitchen,
+        needsKitchen: product.needsKitchen,
+        // Firestore rejects `undefined` field values outright — only attach
+        // these when something was actually picked.
+        ...(selectedFlavors ? { selectedFlavors } : {}),
+        ...(selectedToppings ? { selectedToppings } : {}),
       };
       const key = itemKey(newItem);
       setCart((prev) => {
@@ -363,6 +375,33 @@ const TakeOrder: React.FC = () => {
     // items in one go; the floating cart bar (cartCount > 0 && !cartOpen)
     // already surfaces the running total, and staff open the cart manually
     // when they're actually done.
+  }
+
+  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number; selectedFlavors?: string[]; selectedToppings?: string[] }[]) {
+    if (!pickerProduct) return;
+    addItemsToCart(pickerProduct, items);
+  }
+
+  // A product with exactly one sellable variant has nothing to choose —
+  // skip the variant/quantity picker and add 1 unit straight to the cart;
+  // tapping again just increments it via the same cart-merge logic.
+  function handleTileTap(p: Product) {
+    // Flavor and toppings are both decoupled from the variant grid entirely
+    // (never split price/stock — see Product.hasFlavors) so neither is
+    // reflected in the variant count; skip the quick-add whenever either is
+    // on. Gated on the actual list having entries, not just the toggle —
+    // "hasToppings: true" with an empty toppingNames list (e.g. the toggle
+    // was flipped on but nothing was ever picked) has nothing to choose from,
+    // so it shouldn't force the picker open with a blank section either.
+    const needsFlavorPick = !!p.hasFlavors && (p.flavors?.length ?? 0) > 0;
+    const needsToppingPick = !!p.hasToppings && (p.toppingNames?.length ?? 0) > 0;
+    const sellable = p.variants.filter((v) => v.status !== "inactive");
+    if (sellable.length === 1 && !needsFlavorPick && !needsToppingPick) {
+      const v = sellable[0];
+      addItemsToCart(p, [{ variant: v, quantity: 1, unitPrice: v.price ?? p.price ?? 0, costPrice: v.costPrice ?? p.costPrice }]);
+    } else {
+      setPickerProduct(p);
+    }
   }
 
   function removeCartItem(key: string) {
@@ -471,7 +510,10 @@ const TakeOrder: React.FC = () => {
       await createOrder(shopId, cart, session.id, session.tableLabel, user.uid, displayName);
       setTableSession(session);
       setCart([]);
-      setCartOpen(false);
+      // Land on ປະຫວັດການສັ່ງ (still inside the same modal) so the
+      // just-confirmed ticket is immediately visible, and ປິດບິນ is right
+      // there for whenever the table's ready to pay.
+      setOrderView("history");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "ສົ່ງອໍເດີ້ບໍ່ສຳເລັດ");
@@ -496,6 +538,48 @@ const TakeOrder: React.FC = () => {
     // history tab, so it doesn't show stale data from an earlier visit.
     if (cartOpen && orderView === "history") loadHistory();
   }, [cartOpen, orderView, loadHistory]);
+
+  // What's actually owed for this table right now — cancelled tickets don't
+  // count (same reasoning CheckBill.tsx should apply too: a void ticket was
+  // never really "served"), same subtotal/service-charge shape as CheckBill.
+  const unpaidOrders = historyOrders.filter((o) => o.status !== "cancelled");
+  const billSubtotal = unpaidOrders.reduce((s, o) => s + o.total, 0);
+  const currentRosterEntry = roster.find((r) => tableDisplayLabel(r.label, r.zone) === tableLabel);
+  const billChargeApplies = serviceChargeSettings.enabled && !!currentRosterEntry?.serviceCharge;
+  const billServiceChargePercent = billChargeApplies ? serviceChargeSettings.percent : 0;
+  const billServiceChargeAmount = billChargeApplies ? Math.round(billSubtotal * serviceChargeSettings.percent / 100) : 0;
+  const billTotal = billSubtotal + billServiceChargeAmount;
+
+  async function handleClosePay(paymentType: PaymentType) {
+    if (!shopId || !tableSession || unpaidOrders.length === 0) return;
+    setPayBusy(true);
+    setPayError(null);
+    try {
+      let serviceCharge: { saleId: string; items: SaleItem[]; total: number } | undefined;
+      if (billServiceChargeAmount > 0) {
+        const first = unpaidOrders[0];
+        const chargeItem: SaleItem = {
+          productId: "__service_charge__",
+          productName: `ຄ່າບໍລິການ (${billServiceChargePercent}%)`,
+          variant: { size: "", color: "", stock: 0 },
+          quantity: 1,
+          originalPrice: billServiceChargeAmount,
+          unitPrice: billServiceChargeAmount,
+          costPrice: 0,
+          needsKitchen: false,
+        };
+        serviceCharge = { saleId: first.id, items: [...first.items, chargeItem], total: first.total + billServiceChargeAmount };
+      }
+      await closeBill(shopId, unpaidOrders.map((o) => o.id), paymentType, serviceCharge);
+      await closeSession(shopId, tableSession.id);
+      setCartOpen(false);
+      backToTables();
+    } catch {
+      setPayError("ປິດບິນບໍ່ສຳເລັດ, ລອງໃໝ່");
+    } finally {
+      setPayBusy(false);
+    }
+  }
 
   async function handleShowQr(label: string) {
     if (!shopId || !label.trim()) return;
@@ -848,7 +932,7 @@ const TakeOrder: React.FC = () => {
                   <IonCol key={p.id} size="6" sizeMd="4" sizeLg="3" style={{ padding: 6 }}>
                     <button
                       disabled={outOfStock}
-                      onClick={() => setPickerProduct(p)}
+                      onClick={() => handleTileTap(p)}
                       style={{
                         width: "100%", minHeight: 140, borderRadius: 16, border: "none",
                         background: outOfStock ? "var(--ion-color-step-50, #f5f5f4)" : "var(--ion-item-background, #ffffff)",
@@ -949,7 +1033,7 @@ const TakeOrder: React.FC = () => {
         )}
       </IonContent>
 
-      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct} onAdd={handleAddToCart} onDismiss={() => setPickerProduct(null)} confirmLabel="ເພີ່ມຫຼາຍລາຍການ" />
+      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct} shopId={shopId ?? undefined} onAdd={handleAddToCart} onDismiss={() => setPickerProduct(null)} confirmLabel="ເພີ່ມຫຼາຍລາຍການ" />
 
       {/* ── Bundle variant picker ── */}
       <IonModal
@@ -1155,7 +1239,10 @@ const TakeOrder: React.FC = () => {
                       {item.isBundle
                         ? (item.bundleItems ?? []).map((bi) => `${bi.productName}${bi.variantSize ? ` (${bi.variantSize}${bi.variantColor ? `/${bi.variantColor}` : ""})` : ""}`).join(", ")
                         : `${item.variant.size}${item.variant.color ? ` / ${item.variant.color}` : ""}`
-                      } — {fmtK(item.unitPrice * item.quantity)} ກີບ
+                      }
+                      {item.selectedFlavors?.length ? ` · ${item.selectedFlavors.join("+")}` : ""}
+                      {item.selectedToppings?.length ? ` · ${item.selectedToppings.join(", ")}` : ""}
+                      {" — "}{fmtK(item.unitPrice * item.quantity)} ກີບ
                     </p>
                   </div>
                   <button onClick={() => removeCartItem(key)} style={{ background: "none", border: "none", color: "var(--app-danger)", cursor: "pointer", minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1203,6 +1290,8 @@ const TakeOrder: React.FC = () => {
                         <span style={{ color: "var(--ion-text-color)" }}>
                           {it.productName}
                           {!it.isBundle && it.variant.size ? ` (${it.variant.size}${it.variant.color ? `/${it.variant.color}` : ""})` : ""}
+                          {it.selectedFlavors?.length ? ` · ${it.selectedFlavors.join("+")}` : ""}
+                          {it.selectedToppings?.length ? ` · ${it.selectedToppings.join(", ")}` : ""}
                           {" "}×{it.quantity}
                         </span>
                         <span style={{ color: "var(--app-text-secondary)", fontWeight: 600 }}>{fmtK(it.unitPrice * it.quantity)}</span>
@@ -1222,32 +1311,78 @@ const TakeOrder: React.FC = () => {
           )}
         </IonContent>
         <IonFooter>
-          <div style={{ padding: "12px 16px 28px", background: "var(--ion-item-background, #fff)", borderTop: "1px solid var(--app-border)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, fontSize: "0.9rem", fontWeight: 700 }}>
-              <span style={{ color: "var(--app-text-secondary)" }}>ລວມ</span>
-              <span style={{ color: "var(--ion-color-primary)" }}>{fmtK(cartTotal)} ກີບ</span>
+          {orderView === "new" ? (
+            <div style={{ padding: "12px 16px 28px", background: "var(--ion-item-background, #fff)", borderTop: "1px solid var(--app-border)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, fontSize: "0.9rem", fontWeight: 700 }}>
+                <span style={{ color: "var(--app-text-secondary)" }}>ລວມ</span>
+                <span style={{ color: "var(--ion-color-primary)" }}>{fmtK(cartTotal)} ກີບ</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <IonButton
+                  expand="block"
+                  disabled={cart.length === 0 || sending}
+                  onClick={handleSendToKitchen}
+                  style={{ flex: 1, minHeight: 52, "--border-radius": "14px", margin: 0 }}
+                >
+                  {sending
+                    ? (<span style={{ display: "flex", alignItems: "center", gap: 8 }}><IonSpinner name="dots" style={{ width: 20, height: 20 }} /> ກຳລັງສົ່ງ...</span>)
+                    : "ຢືນຢັນຈັດຕຽມອໍເດີ"
+                  }
+                </IonButton>
+                <IonButton
+                  fill="outline" onClick={() => setCartOpen(false)}
+                  style={{ flexShrink: 0, minHeight: 52, "--border-radius": "14px", margin: 0, "--padding-start": "12px", "--padding-end": "14px" }}
+                >
+                  <IonIcon slot="start" icon={addOutline} />
+                  ເພີ່ມອີກ
+                </IonButton>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <IonButton
-                expand="block"
-                disabled={cart.length === 0 || sending}
-                onClick={handleSendToKitchen}
-                style={{ flex: 1, minHeight: 52, "--border-radius": "14px", margin: 0 }}
-              >
-                {sending
-                  ? (<span style={{ display: "flex", alignItems: "center", gap: 8 }}><IonSpinner name="dots" style={{ width: 20, height: 20 }} /> ກຳລັງສົ່ງ...</span>)
-                  : "ຢືນຢັນຈັດຕຽມອໍເດີ"
-                }
-              </IonButton>
-              <IonButton
-                fill="outline" onClick={() => setCartOpen(false)}
-                style={{ flexShrink: 0, minHeight: 52, "--border-radius": "14px", margin: 0, "--padding-start": "12px", "--padding-end": "14px" }}
-              >
-                <IonIcon slot="start" icon={addOutline} />
-                ເພີ່ມອີກ
-              </IonButton>
+          ) : unpaidOrders.length > 0 && (
+            <div style={{ padding: "12px 16px 28px", background: "var(--ion-item-background, #fff)", borderTop: "1px solid var(--app-border)" }}>
+              {billServiceChargeAmount > 0 && (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "2px 0" }}>
+                    <span style={{ color: "var(--app-text-secondary)" }}>ຍອດລວມຍ່ອຍ</span>
+                    <span>{fmtK(billSubtotal)} ກີບ</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "2px 0" }}>
+                    <span style={{ color: "var(--app-text-secondary)" }}>ຄ່າບໍລິການ ({billServiceChargePercent}%)</span>
+                    <span>{fmtK(billServiceChargeAmount)} ກີບ</span>
+                  </div>
+                </>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, fontSize: "0.9rem", fontWeight: 700 }}>
+                <span style={{ color: "var(--app-text-secondary)" }}>ຍອດລວມ ({unpaidOrders.length} ອໍເດີ້)</span>
+                <span style={{ color: "var(--ion-color-primary)", fontSize: "1.05rem" }}>{fmtK(billTotal)} ກີບ</span>
+              </div>
+              <p style={{ margin: "0 0 8px", fontSize: "0.78rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>
+                ຈ່າຍດ້ວຍຫຍັງ?
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(
+                  [
+                    { v: "cash" as const, label: "💵 ສົດ", color: "var(--app-success)" },
+                    { v: "qr" as const, label: "📱 ໂອນ", color: "var(--app-info)" },
+                  ]
+                ).map(({ v, label, color }) => (
+                  <button
+                    key={v}
+                    disabled={payBusy}
+                    onClick={() => handleClosePay(v)}
+                    style={{
+                      flex: 1, padding: "14px 0", borderRadius: 12, border: "none",
+                      background: color, color: "#fff", fontWeight: 700, fontSize: "0.9rem",
+                      cursor: payBusy ? "not-allowed" : "pointer", opacity: payBusy ? 0.6 : 1,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {payError && <p style={{ color: "var(--app-danger)", fontSize: "0.82rem", marginTop: 10 }}>{payError}</p>}
             </div>
-          </div>
+          )}
         </IonFooter>
       </IonModal>
     </IonPage>

@@ -28,8 +28,10 @@ import VariantPicker from "../components/VariantPicker";
 import EmptyState from "../components/EmptyState";
 import type { Product, ProductVariant, SaleItem, ShopProfile, TableSession } from "../data/types";
 
-function itemKey(item: Pick<SaleItem, "productId" | "variant">) {
-  return `${item.productId}__${item.variant.size}__${item.variant.color}`;
+function itemKey(item: Pick<SaleItem, "productId" | "variant" | "selectedFlavors" | "selectedToppings">) {
+  const flavorPart = (item.selectedFlavors ?? []).slice().sort().join(",");
+  const toppingPart = (item.selectedToppings ?? []).slice().sort().join(",");
+  return `${item.productId}__${item.variant.size}__${item.variant.color}__${flavorPart}__${toppingPart}`;
 }
 
 type PageState = "loading" | "invalid" | "ready";
@@ -94,9 +96,9 @@ const PublicOrder: React.FC = () => {
   const categories = [...new Set(products.map((p) => p.category).filter(Boolean) as string[])];
   const filtered = activeCategory === "all" ? productsEffective : productsEffective.filter((p) => p.category === activeCategory);
 
-  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number }[]) {
+  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number; selectedFlavors?: string[]; selectedToppings?: string[] }[]) {
     if (!pickerProduct) return;
-    items.forEach(({ variant, quantity, unitPrice, costPrice }) => {
+    items.forEach(({ variant, quantity, unitPrice, costPrice, selectedFlavors, selectedToppings }) => {
       const newItem: SaleItem = {
         productId: pickerProduct.id,
         productName: pickerProduct.name,
@@ -106,6 +108,10 @@ const PublicOrder: React.FC = () => {
         unitPrice,
         costPrice,
         needsKitchen: pickerProduct.needsKitchen,
+        // Firestore rejects `undefined` field values outright — only attach
+        // these when something was actually picked.
+        ...(selectedFlavors ? { selectedFlavors } : {}),
+        ...(selectedToppings ? { selectedToppings } : {}),
       };
       const key = itemKey(newItem);
       setCart((prev) => {
@@ -299,7 +305,7 @@ const PublicOrder: React.FC = () => {
         )}
       </IonContent>
 
-      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct} onAdd={handleAddToCart} onDismiss={() => setPickerProduct(null)} />
+      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct} shopId={shopId} onAdd={handleAddToCart} onDismiss={() => setPickerProduct(null)} />
 
       {cartCount > 0 && !cartOpen && (
         <div style={{ position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 20 }}>
@@ -337,7 +343,10 @@ const PublicOrder: React.FC = () => {
                   <div>
                     <p style={{ margin: 0, fontWeight: 700, fontSize: "0.9rem", color: "var(--ion-text-color)" }}>{item.productName} ×{item.quantity}</p>
                     <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--app-text-secondary)" }}>
-                      {item.variant.size}{item.variant.color ? ` / ${item.variant.color}` : ""} — {fmtK(item.unitPrice * item.quantity)} ກີບ
+                      {item.variant.size}{item.variant.color ? ` / ${item.variant.color}` : ""}
+                      {item.selectedFlavors?.length ? ` · ${item.selectedFlavors.join("+")}` : ""}
+                      {item.selectedToppings?.length ? ` · ${item.selectedToppings.join(", ")}` : ""}
+                      {" — "}{fmtK(item.unitPrice * item.quantity)} ກີບ
                     </p>
                   </div>
                   <button onClick={() => removeCartItem(key)} style={{ background: "none", border: "none", color: "var(--app-danger)", cursor: "pointer", minHeight: 44, minWidth: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -412,6 +421,8 @@ const PublicOrder: React.FC = () => {
                   <span style={{ color: "var(--ion-text-color)" }}>
                     {item.productName}
                     {item.variant.size && item.variant.color !== "__bundle__" ? ` (${item.variant.size}${item.variant.color ? `/${item.variant.color}` : ""})` : ""}
+                    {item.selectedFlavors?.length ? ` · ${item.selectedFlavors.join("+")}` : ""}
+                    {item.selectedToppings?.length ? ` · ${item.selectedToppings.join(", ")}` : ""}
                     {" "}×{item.quantity}
                   </span>
                   <span style={{ fontWeight: 600 }}>{fmtK(item.unitPrice * item.quantity)} ກີບ</span>

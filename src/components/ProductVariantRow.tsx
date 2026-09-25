@@ -1,60 +1,40 @@
-import { IonButton, IonIcon, IonInput, IonSelect, IonSelectOption } from "@ionic/react";
-import { trashOutline } from "ionicons/icons";
+import { IonButton, IonIcon, IonSelect, IonSelectOption } from "@ionic/react";
+import { trashOutline, chevronDownOutline } from "ionicons/icons";
 import type { ProductVariant } from "../data/types";
 import NumInput from "./NumInput";
 
 interface Props {
   variant: ProductVariant;
   index: number;
-  hasFlavors: boolean;
-  flavors: string[];
   trackStock: boolean;
-  invalid: { size?: boolean; color?: boolean };
+  invalid: { size?: boolean };
   errorMsg?: string;
   canDelete: boolean;
   onChange: (field: keyof ProductVariant, value: string | number) => void;
   onDelete: () => void;
+  onOpenSizePicker: () => void;
 }
 
-const cellStyle: React.CSSProperties = {
-  "--min-height": "44px", textAlign: "center",
-} as React.CSSProperties;
-
 const ProductVariantRow: React.FC<Props> = ({
-  variant: v, hasFlavors, flavors, trackStock, invalid, errorMsg, canDelete, onChange, onDelete,
+  variant: v, trackStock, invalid, errorMsg, canDelete, onChange, onDelete, onOpenSizePicker,
 }) => {
   const borderNormal = "1.5px solid var(--app-border)";
 
   return (
     <div style={{ border: "1px solid var(--app-border)", borderRadius: 12, padding: 10, marginBottom: 8 }}>
-      <div style={{ display: "grid", gridTemplateColumns: hasFlavors ? "1fr 1fr" : "1fr", gap: 8, marginBottom: 8 }}>
-        <div>
-          <IonInput
-            fill="outline" placeholder="ຂະໜາດ *" value={v.size}
-            onIonInput={(e) => onChange("size", e.detail.value ?? "")}
-            style={{
-              ...cellStyle,
-              "--border-color": invalid.size ? "var(--app-danger)" : undefined,
-              "--highlight-color-focused": invalid.size ? "var(--app-danger)" : undefined,
-            }}
-          />
-        </div>
-        {hasFlavors && (
-          <div>
-            <IonSelect
-              interface="popover"
-              placeholder="ລົດຊາດ *"
-              value={v.color || undefined}
-              onIonChange={(e) => onChange("color", e.detail.value ?? "")}
-              style={{
-                border: `1.5px solid ${invalid.color ? "var(--app-danger)" : "var(--app-border)"}`,
-                borderRadius: 8, minHeight: 44, "--padding-start": "10px", "--padding-end": "10px",
-              }}
-            >
-              {flavors.map((f) => <IonSelectOption key={f} value={f}>{f}</IonSelectOption>)}
-            </IonSelect>
-          </div>
-        )}
+      <div
+        onClick={onOpenSizePicker}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          height: 44, padding: "0 12px", borderRadius: 8, cursor: "pointer", marginBottom: 8,
+          border: `1.5px solid ${invalid.size ? "var(--app-danger)" : "var(--app-border)"}`,
+          background: "var(--app-surface)",
+        }}
+      >
+        <span style={{ fontSize: "0.92rem", color: v.size ? "var(--ion-text-color)" : "var(--app-text-muted)" }}>
+          {v.size || "ຂະໜາດ *"}
+        </span>
+        <IonIcon icon={chevronDownOutline} style={{ color: "var(--app-text-muted)", fontSize: 16 }} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>

@@ -131,15 +131,19 @@ service cloud.firestore {
             || request.resource.data.exchangeRates is list
           )
         )
-        // Toppings + serving units + food groups + sizes + colors —
+        // Toppings + serving units + food groups + sizes + colors + flavors —
         // menu-configuration, so gated like managing products rather than
         // table/zone setup.
         || (
           (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'))
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['toppings', 'units', 'foodGroups', 'sizes', 'colors', 'updatedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['toppings', 'units', 'foodGroups', 'sizes', 'colors', 'flavors', 'updatedAt'])
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['toppings'])
             || request.resource.data.toppings is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['flavors'])
+            || request.resource.data.flavors is list
           )
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['units'])
