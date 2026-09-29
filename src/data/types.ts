@@ -213,6 +213,64 @@ export interface Customer {
   enabled: boolean;
 }
 
+// ຕິດໜີ້ (credit/tab) balance for one customer — positive = they owe the
+// shop this much. One doc per customer; balance is only ever changed via
+// chargeCredit/recordCreditPayment (creditRepository.ts), never written
+// directly, so it always matches the sum of that customer's CreditTransactions.
+export interface CustomerCredit {
+  id: string; // == customerId
+  customerId: string;
+  customerName: string;
+  balance: number;
+  updatedAt: Date;
+}
+
+// One ledger entry for a CustomerCredit — "charge" adds to the balance (a
+// credit sale), "payment" reduces it (the customer paying down their tab).
+export interface CreditTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  type: "charge" | "payment";
+  amount: number;
+  saleId?: string; // set when type === "charge"
+  billNumber?: string;
+  note?: string;
+  createdAt: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}
+
+// ຝາກ (bottle-keeping): how much of one product a customer currently has in
+// storage at the shop. One doc per (customerId, productId) pair; quantity is
+// only ever changed via depositProduct/withdrawProduct (depositRepository.ts),
+// so it always matches the sum of that pair's DepositTransactions.
+export interface ProductDeposit {
+  id: string; // `${customerId}_${productId}`
+  customerId: string;
+  customerName: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  updatedAt: Date;
+}
+
+// One ledger entry for a ProductDeposit — "deposit" adds to the quantity,
+// "withdraw" reduces it (the customer taking some of it back).
+export interface DepositTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  productId: string;
+  productName: string;
+  type: "deposit" | "withdraw";
+  quantity: number;
+  note?: string;
+  createdAt: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}
+
 export interface ShopProfile {
   id: string;
   name: string;
@@ -251,7 +309,13 @@ export interface ShopUser {
   allowedZones?: string[];
 }
 
-export type PaymentType = "cash" | "qr";
+// "qr" is the internal value for transfer payments (labeled ໂອນ everywhere)
+// — kept as-is rather than renamed, to avoid touching every existing
+// paymentType === "qr" comparison across reports/history for no real gain.
+// "split" = part cash + part transfer (Sale.paymentCash/.paymentTransfer);
+// "credit" = charged (in full or in part) to the customer's tab
+// (Sale.paymentCredit + customerId — see CustomerCredit/CreditTransaction).
+export type PaymentType = "cash" | "qr" | "split" | "credit";
 
 // Was a fixed 3-value union; widened to allow custom categories (see
 // src/data/expenseCategoryRepository.ts). "shop"/"capital"/"general" are
@@ -304,4 +368,25 @@ export interface Sale {
   cancelledAt?: Date;
   cancelledByUid?: string;
   cancelledByName?: string;
+  // Every payment is describable as a breakdown that sums to `total`,
+  // regardless of paymentType — keeps reporting uniform across all 4 modes
+  // (e.g. cashTotal = Σ paymentCash) instead of branching on paymentType.
+  paymentCash?: number;
+  paymentTransfer?: number;
+  paymentCredit?: number; // portion charged to customerId's tab
+  customerId?: string;    // set when paymentCredit > 0
+  customerName?: string;
+  billNumber?: string;    // "DDMMYY-NNNN", assigned atomically in closeBill
+  // Set only on a doc born by splitting off part of an existing order's
+  // items during item-level bill-splitting (ແຍກຈ່າຍ) — see closeBill.
+  splitFromSaleId?: string;
+}
+
+// Addressing for closeBill: which doc(s)/items a single payment event
+// covers. Omitting itemIndexes means "the whole doc" (today's original
+// behavior); a subset means "shrink the original doc to its remainder and
+// spin off a new paid doc for just these items" — see closeBill.
+export interface BillTarget {
+  saleId: string;
+  itemIndexes?: number[];
 }

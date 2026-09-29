@@ -19,22 +19,24 @@ import {
   IonMenuButton,
   IonAlert,
   IonSearchbar,
+  IonActionSheet,
   useIonViewWillEnter,
 } from "@ionic/react";
-import { trashOutline, qrCodeOutline, addOutline, removeOutline, checkmarkOutline, chevronBackOutline, printOutline, settingsOutline, refreshOutline } from "ionicons/icons";
+import { trashOutline, qrCodeOutline, addOutline, removeOutline, checkmarkOutline, chevronBackOutline, printOutline, settingsOutline, refreshOutline, ellipsisHorizontalOutline, copyOutline, swapHorizontalOutline, gitMergeOutline } from "ionicons/icons";
 import QRCode from "qrcode";
 import { fmtK } from "../utils/format";
 import { useAuth } from "../context/AuthContext";
 import { getProducts } from "../data/productRepository";
 import { getBundles } from "../data/bundleRepository";
-import { createOrder, getOrdersBySession, closeBill } from "../data/saleRepository";
-import { getOrCreateOpenSession, getOpenSessions, closeSession } from "../data/tableSessionRepository";
+import { createOrder, getOrdersBySession } from "../data/saleRepository";
+import { getOrCreateOpenSession, getOpenSessions, closeSession, moveSession, mergeSessions } from "../data/tableSessionRepository";
 import { getTableRoster, tableDisplayLabel, getServiceChargeSettings, type TableRosterEntry, type ServiceChargeSettings } from "../data/shopRepository";
 import { computeReserved, reservedKey } from "../utils/stock";
 import VariantPicker from "../components/VariantPicker";
+import PayBillModal from "../components/PayBillModal";
 import ShopHeaderTag from "../components/ShopHeaderTag";
 import EmptyState from "../components/EmptyState";
-import type { Bundle, BundleItem, OrderStatus, PaymentType, Product, ProductVariant, Sale, SaleItem, TableSession } from "../data/types";
+import type { Bundle, BundleItem, BillTarget, OrderStatus, Product, ProductVariant, Sale, SaleItem, TableSession } from "../data/types";
 
 function itemKey(item: Pick<SaleItem, "productId" | "variant" | "selectedFlavors" | "selectedToppings">) {
   const flavorPart = (item.selectedFlavors ?? []).slice().sort().join(",");
@@ -125,14 +127,26 @@ const TakeOrder: React.FC = () => {
   const [historyOrders, setHistoryOrders] = useState<Sale[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   // ປິດບິນ (close/check the bill) from right inside the history tab — same
-  // computation + payment flow as CheckBill.tsx, just scoped to this table.
+  // computation feeds PayBillModal.tsx, which CheckBill.tsx also uses.
   const [serviceChargeSettings, setServiceChargeSettings] = useState<ServiceChargeSettings>({ enabled: false, percent: 0 });
-  const [payBusy, setPayBusy] = useState(false);
-  const [payError, setPayError] = useState<string | null>(null);
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  // ແຍກຈ່າຍ: every item row carries its own checkbox all the time; checking
+  // any of them is what puts the footer into "pay just these" mode — saleId
+  // -> selected item indexes within that order's `items[]`.
+  const [selected, setSelected] = useState<Map<string, Set<number>>>(new Map());
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrUrl, setQrUrl] = useState("");
+  const [qrCopied, setQrCopied] = useState(false);
   const [qrBusy, setQrBusy] = useState(false);
   const [qrTableLabel, setQrTableLabel] = useState("");
+
+  // "..." menu on the history tab: ຍ້າຍ/ຮວມໂຕະ + ສ້າງ QR (already-built
+  // handleShowQr, reused). `tableAction` also drives the target-table picker
+  // modal once a mode is chosen from the action sheet.
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [tableAction, setTableAction] = useState<"move" | "merge" | null>(null);
+  const [tableActionBusy, setTableActionBusy] = useState(false);
 
   // Removing the last item empties the cart while the sheet is still open —
   // rather than leave the seller staring at an empty order screen, close it
@@ -522,12 +536,14 @@ const TakeOrder: React.FC = () => {
     }
   }
 
-  const loadHistory = useCallback(async () => {
-    if (!shopId || !tableSession) { setHistoryOrders([]); return; }
+  const loadHistory = useCallback(async (): Promise<Sale[]> => {
+    if (!shopId || !tableSession) { setHistoryOrders([]); return []; }
     setHistoryLoading(true);
     try {
       const orders = await getOrdersBySession(shopId, tableSession.id);
-      setHistoryOrders([...orders].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+      const sorted = [...orders].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      setHistoryOrders(sorted);
+      return sorted;
     } finally {
       setHistoryLoading(false);
     }
@@ -550,34 +566,45 @@ const TakeOrder: React.FC = () => {
   const billServiceChargeAmount = billChargeApplies ? Math.round(billSubtotal * serviceChargeSettings.percent / 100) : 0;
   const billTotal = billSubtotal + billServiceChargeAmount;
 
-  async function handleClosePay(paymentType: PaymentType) {
-    if (!shopId || !tableSession || unpaidOrders.length === 0) return;
-    setPayBusy(true);
-    setPayError(null);
-    try {
-      let serviceCharge: { saleId: string; items: SaleItem[]; total: number } | undefined;
-      if (billServiceChargeAmount > 0) {
-        const first = unpaidOrders[0];
-        const chargeItem: SaleItem = {
-          productId: "__service_charge__",
-          productName: `ຄ່າບໍລິການ (${billServiceChargePercent}%)`,
-          variant: { size: "", color: "", stock: 0 },
-          quantity: 1,
-          originalPrice: billServiceChargeAmount,
-          unitPrice: billServiceChargeAmount,
-          costPrice: 0,
-          needsKitchen: false,
-        };
-        serviceCharge = { saleId: first.id, items: [...first.items, chargeItem], total: first.total + billServiceChargeAmount };
+  // ແຍກຈ່າຍ selection, flattened for PayBillModal — a saleId only appears
+  // once, carrying every index picked from that order's items[].
+  const selectedTargets: BillTarget[] = Array.from(selected.entries())
+    .filter(([, idxs]) => idxs.size > 0)
+    .map(([saleId, idxs]) => ({ saleId, itemIndexes: Array.from(idxs) }));
+  const selectedItems: SaleItem[] = selectedTargets.flatMap(({ saleId, itemIndexes }) => {
+    const order = unpaidOrders.find((o) => o.id === saleId);
+    if (!order) return [];
+    return (itemIndexes ?? []).map((idx) => order.items[idx]).filter((it): it is SaleItem => !!it);
+  });
+  const selectedCount = selectedItems.reduce((s, it) => s + it.quantity, 0);
+  const selectedSubtotal = selectedItems.reduce((s, it) => s + it.unitPrice * it.quantity, 0);
+  const hasSelection = selected.size > 0;
+
+  function toggleItemSelect(saleId: string, itemIndex: number) {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      const idxs = new Set(next.get(saleId));
+      if (idxs.has(itemIndex)) idxs.delete(itemIndex); else idxs.add(itemIndex);
+      if (idxs.size === 0) next.delete(saleId); else next.set(saleId, idxs);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Map());
+  }
+
+  async function handlePaySuccess() {
+    setPayModalOpen(false);
+    clearSelection();
+    const fresh = await loadHistory();
+    const stillUnpaid = fresh.some((o) => o.status !== "cancelled");
+    if (!stillUnpaid) {
+      if (shopId && tableSession) {
+        await closeSession(shopId, tableSession.id).catch(() => {});
       }
-      await closeBill(shopId, unpaidOrders.map((o) => o.id), paymentType, serviceCharge);
-      await closeSession(shopId, tableSession.id);
       setCartOpen(false);
       backToTables();
-    } catch {
-      setPayError("ປິດບິນບໍ່ສຳເລັດ, ລອງໃໝ່");
-    } finally {
-      setPayBusy(false);
     }
   }
 
@@ -590,6 +617,8 @@ const TakeOrder: React.FC = () => {
       const session = await getOrCreateOpenSession(shopId, label.trim());
       const url = `${window.location.origin}/order/${shopId}/${session.code}`;
       setQrDataUrl(await QRCode.toDataURL(url, { width: 240, margin: 1 }));
+      setQrUrl(url);
+      setQrCopied(false);
       setQrTableLabel(session.tableLabel);
       setQrOpen(true);
     } catch {
@@ -598,6 +627,91 @@ const TakeOrder: React.FC = () => {
       setQrBusy(false);
     }
   }
+
+  async function handleCopyQrLink() {
+    try {
+      await navigator.clipboard.writeText(qrUrl);
+      setQrCopied(true);
+      setTimeout(() => setQrCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — link is still shown as selectable text */
+    }
+  }
+
+  // ຍ້າຍ/ຮວມໂຕະ — tapping a target tile in the picker modal opened from the
+  // "..." action sheet. `move` renames the CURRENT session onto an empty
+  // table; `merge` absorbs an already-occupied target session into it.
+  async function handleTableActionPick(target: TableTile) {
+    if (!shopId || !tableSession || tableActionBusy) return;
+    const targetLabel = tableDisplayLabel(target.label, target.zone);
+    setTableActionBusy(true);
+    setError(null);
+    try {
+      if (tableAction === "move") {
+        await moveSession(shopId, tableSession.id, targetLabel);
+        setTableLabel(targetLabel);
+        setTableSession({ ...tableSession, tableLabel: targetLabel });
+      } else if (tableAction === "merge" && target.session) {
+        await mergeSessions(shopId, target.session.id, tableSession.id, tableLabel);
+      }
+      setTableAction(null);
+      await loadHistory();
+    } catch {
+      setError(tableAction === "move" ? "ຍ້າຍໂຕະບໍ່ສຳເລັດ" : "ຮວມໂຕະບໍ່ສຳເລັດ");
+    } finally {
+      setTableActionBusy(false);
+    }
+  }
+
+  // Shared between both steps below — Step 1's tile grid AND Step 2's "..."
+  // menu can both trigger handleShowQr, so this needs to render in whichever
+  // <IonPage> is actually mounted.
+  const qrModal = (
+    <IonModal isOpen={qrOpen} onDidDismiss={() => setQrOpen(false)}>
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #qr-print-area, #qr-print-area * { visibility: visible; }
+          #qr-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
+        }
+      `}</style>
+      <IonHeader className="ion-no-print">
+        <IonToolbar>
+          <IonTitle style={{ fontSize: "1rem" }}>QR ໂຕະ {qrTableLabel}</IonTitle>
+          <IonButtons slot="end">
+            <IonButton onClick={() => setQrOpen(false)}>ປິດ</IonButton>
+          </IonButtons>
+        </IonToolbar>
+      </IonHeader>
+      <IonContent>
+        <div id="qr-print-area" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 16px" }}>
+          <p style={{ margin: "0 0 12px", fontWeight: 800, fontSize: "1.1rem" }}>ໂຕະ {qrTableLabel}</p>
+          {qrDataUrl && <img src={qrDataUrl} alt="QR" style={{ width: 240, height: 240, borderRadius: 12, border: "1px solid var(--app-border)" }} />}
+          <p style={{ marginTop: 16, fontSize: "0.82rem", color: "var(--app-text-secondary)", textAlign: "center" }}>
+            ໃຫ້ລູກຄ້າສະແກນເພື່ອສັ່ງເມນູເອງໄດ້ຈາກມືຖື
+          </p>
+          {qrUrl && (
+            <p className="ion-no-print" style={{
+              marginTop: 12, fontSize: "0.78rem", color: "var(--app-text-secondary)", textAlign: "center",
+              wordBreak: "break-all", padding: "8px 10px", background: "var(--app-accent-surface)", borderRadius: 8, width: "100%",
+            }}>
+              {qrUrl}
+            </p>
+          )}
+          <div className="ion-no-print" style={{ display: "flex", gap: 8, marginTop: 16, width: "100%" }}>
+            <IonButton fill="outline" onClick={handleCopyQrLink} style={{ "--border-radius": "10px", flex: 1, margin: 0 }}>
+              <IonIcon slot="start" icon={copyOutline} />
+              {qrCopied ? "ຄັດລອກແລ້ວ ✓" : "ຄັດລອກລິ້ງ"}
+            </IonButton>
+            <IonButton fill="outline" onClick={() => window.print()} style={{ "--border-radius": "10px", flex: 1, margin: 0 }}>
+              <IonIcon slot="start" icon={printOutline} />
+              ພິມ QR
+            </IonButton>
+          </div>
+        </div>
+      </IonContent>
+    </IonModal>
+  );
 
   // ── Step 1 UI: table list ────────────────────────────────────────────
   if (step === "select-table") {
@@ -782,40 +896,7 @@ const TakeOrder: React.FC = () => {
           onDidDismiss={() => setDeleteTarget(null)}
         />
 
-        {/* QR for a table — customer scans to order from their own phone */}
-        <IonModal isOpen={qrOpen} onDidDismiss={() => setQrOpen(false)}>
-          <style>{`
-            @media print {
-              body * { visibility: hidden; }
-              #qr-print-area, #qr-print-area * { visibility: visible; }
-              #qr-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 24px; }
-            }
-          `}</style>
-          <IonHeader className="ion-no-print">
-            <IonToolbar>
-              <IonTitle style={{ fontSize: "1rem" }}>QR ໂຕະ {qrTableLabel}</IonTitle>
-              <IonButtons slot="end">
-                <IonButton onClick={() => setQrOpen(false)}>ປິດ</IonButton>
-              </IonButtons>
-            </IonToolbar>
-          </IonHeader>
-          <IonContent>
-            <div id="qr-print-area" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 16px" }}>
-              <p style={{ margin: "0 0 12px", fontWeight: 800, fontSize: "1.1rem" }}>ໂຕະ {qrTableLabel}</p>
-              {qrDataUrl && <img src={qrDataUrl} alt="QR" style={{ width: 240, height: 240, borderRadius: 12, border: "1px solid var(--app-border)" }} />}
-              <p style={{ marginTop: 16, fontSize: "0.82rem", color: "var(--app-text-secondary)", textAlign: "center" }}>
-                ໃຫ້ລູກຄ້າສະແກນເພື່ອສັ່ງເມນູເອງໄດ້ຈາກມືຖື
-              </p>
-              <IonButton
-                className="ion-no-print" fill="outline" expand="block" onClick={() => window.print()}
-                style={{ "--border-radius": "10px", marginTop: 16, width: "100%" }}
-              >
-                <IonIcon slot="start" icon={printOutline} />
-                ພິມ QR
-              </IonButton>
-            </div>
-          </IonContent>
-        </IonModal>
+        {qrModal}
       </IonPage>
     );
   }
@@ -1169,18 +1250,26 @@ const TakeOrder: React.FC = () => {
         </IonFooter>
       </IonModal>
 
-      {cartCount > 0 && !cartOpen && (
+      {/* Stays visible even with an empty staged cart as long as this table
+          has an open session — otherwise, once the cart clears after
+          confirming an order, there'd be no way left to reopen the modal
+          and get back into ປະຫວັດການສັ່ງ/ເຊັກບິນ for an unpaid table. */}
+      {(cartCount > 0 || !!tableSession) && !cartOpen && (
         <div style={{ position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 20 }}>
           <button
-            onClick={() => setCartOpen(true)}
+            onClick={() => { if (cartCount === 0) setOrderView("history"); setCartOpen(true); }}
             style={{
               width: "100%", padding: "14px 18px", borderRadius: 16, border: "none",
               background: "var(--ion-color-primary)", display: "flex", justifyContent: "space-between", alignItems: "center",
               boxShadow: "0 6px 20px rgba(224,123,57,0.4)", cursor: "pointer",
             }}
           >
-            <span style={{ color: "#fff", fontWeight: 800, fontSize: "0.95rem" }}>🧾 {cartCount} ລາຍການ — {fmtK(cartTotal)} ກີບ</span>
-            <span style={{ color: "#fff", fontWeight: 700, fontSize: "0.88rem" }}>ເບິ່ງອໍເດີ້ ›</span>
+            <span style={{ color: "#fff", fontWeight: 800, fontSize: "0.95rem" }}>
+              {cartCount > 0 ? `🧾 ${cartCount} ລາຍການ — ${fmtK(cartTotal)} ກີບ` : "📋 ໂຕະນີ້ຍັງບໍ່ໄດ້ເຊັກບິນ"}
+            </span>
+            <span style={{ color: "#fff", fontWeight: 700, fontSize: "0.88rem" }}>
+              {cartCount > 0 ? "ເບິ່ງອໍເດີ້ ›" : "ເບິ່ງປະຫວັດ/ເຊັກບິນ ›"}
+            </span>
           </button>
         </div>
       )}
@@ -1269,6 +1358,8 @@ const TakeOrder: React.FC = () => {
               {!historyLoading && historyOrders.map((o) => {
                 const cfg = ORDER_STATUS_LABEL[o.status];
                 const qty = o.items.reduce((s, i) => s + i.quantity, 0);
+                const selectable = o.status !== "cancelled";
+                const selectedIdxs = selected.get(o.id);
                 return (
                   <div key={o.id} style={{
                     border: "1px solid var(--app-border)", borderRadius: 12, padding: "12px 14px", marginBottom: 10,
@@ -1285,18 +1376,42 @@ const TakeOrder: React.FC = () => {
                         {o.createdAt.toLocaleTimeString("lo-LA", { hour: "2-digit", minute: "2-digit" })}
                       </span>
                     </div>
-                    {o.items.map((it, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: "0.85rem" }}>
-                        <span style={{ color: "var(--ion-text-color)" }}>
-                          {it.productName}
-                          {!it.isBundle && it.variant.size ? ` (${it.variant.size}${it.variant.color ? `/${it.variant.color}` : ""})` : ""}
-                          {it.selectedFlavors?.length ? ` · ${it.selectedFlavors.join("+")}` : ""}
-                          {it.selectedToppings?.length ? ` · ${it.selectedToppings.join(", ")}` : ""}
-                          {" "}×{it.quantity}
-                        </span>
-                        <span style={{ color: "var(--app-text-secondary)", fontWeight: 600 }}>{fmtK(it.unitPrice * it.quantity)}</span>
-                      </div>
-                    ))}
+                    {o.items.map((it, i) => {
+                      const isSelected = !!selectedIdxs?.has(i);
+                      return (
+                        <div
+                          key={i}
+                          onClick={selectable ? () => toggleItemSelect(o.id, i) : undefined}
+                          style={{
+                            display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 6px", fontSize: "0.85rem",
+                            cursor: selectable ? "pointer" : "default",
+                            borderRadius: 8,
+                            background: isSelected ? "var(--app-accent-surface)" : "transparent",
+                          }}
+                        >
+                          <span style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--ion-text-color)" }}>
+                            {selectable && (
+                              <span style={{
+                                width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                                border: `1.5px solid ${isSelected ? "var(--ion-color-primary)" : "var(--app-border)"}`,
+                                background: isSelected ? "var(--ion-color-primary)" : "transparent",
+                                color: "#fff", fontSize: "0.65rem", display: "flex", alignItems: "center", justifyContent: "center",
+                              }}>
+                                {isSelected ? "✓" : ""}
+                              </span>
+                            )}
+                            <span>
+                              {it.productName}
+                              {!it.isBundle && it.variant.size ? ` (${it.variant.size}${it.variant.color ? `/${it.variant.color}` : ""})` : ""}
+                              {it.selectedFlavors?.length ? ` · ${it.selectedFlavors.join("+")}` : ""}
+                              {it.selectedToppings?.length ? ` · ${it.selectedToppings.join(", ")}` : ""}
+                              {" "}×{it.quantity}
+                            </span>
+                          </span>
+                          <span style={{ color: "var(--app-text-secondary)", fontWeight: 600, flexShrink: 0 }}>{fmtK(it.unitPrice * it.quantity)}</span>
+                        </div>
+                      );
+                    })}
                     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--app-border)" }}>
                       <span style={{ fontSize: "0.8rem", color: "var(--app-text-secondary)" }}>ລວມ {qty} ລາຍການ</span>
                       <span style={{ fontSize: "0.9rem", fontWeight: 800, color: "var(--ion-color-primary)" }}>{fmtK(o.total)} ກີບ</span>
@@ -1307,6 +1422,7 @@ const TakeOrder: React.FC = () => {
                   </div>
                 );
               })}
+              {error && <p style={{ color: "var(--app-danger)", fontSize: "0.85rem", marginTop: 12 }}>{error}</p>}
             </div>
           )}
         </IonContent>
@@ -1340,50 +1456,117 @@ const TakeOrder: React.FC = () => {
             </div>
           ) : unpaidOrders.length > 0 && (
             <div style={{ padding: "12px 16px 28px", background: "var(--ion-item-background, #fff)", borderTop: "1px solid var(--app-border)" }}>
-              {billServiceChargeAmount > 0 && (
-                <>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "2px 0" }}>
-                    <span style={{ color: "var(--app-text-secondary)" }}>ຍອດລວມຍ່ອຍ</span>
-                    <span>{fmtK(billSubtotal)} ກີບ</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "2px 0" }}>
-                    <span style={{ color: "var(--app-text-secondary)" }}>ຄ່າບໍລິການ ({billServiceChargePercent}%)</span>
-                    <span>{fmtK(billServiceChargeAmount)} ກີບ</span>
-                  </div>
-                </>
-              )}
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, fontSize: "0.9rem", fontWeight: 700 }}>
-                <span style={{ color: "var(--app-text-secondary)" }}>ຍອດລວມ ({unpaidOrders.length} ອໍເດີ້)</span>
-                <span style={{ color: "var(--ion-color-primary)", fontSize: "1.05rem" }}>{fmtK(billTotal)} ກີບ</span>
+                <span style={{ color: "var(--app-text-secondary)" }}>
+                  {hasSelection ? `ເລືອກແລ້ວ (${selectedCount} ລາຍການ)` : `ຍອດລວມ (${unpaidOrders.length} ອໍເດີ້)`}
+                </span>
+                <span style={{ color: "var(--ion-color-primary)", fontSize: "1.05rem" }}>
+                  {fmtK(hasSelection ? selectedSubtotal : billTotal)} ກີບ
+                </span>
               </div>
-              <p style={{ margin: "0 0 8px", fontSize: "0.78rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>
-                ຈ່າຍດ້ວຍຫຍັງ?
-              </p>
               <div style={{ display: "flex", gap: 8 }}>
-                {(
-                  [
-                    { v: "cash" as const, label: "💵 ສົດ", color: "var(--app-success)" },
-                    { v: "qr" as const, label: "📱 ໂອນ", color: "var(--app-info)" },
-                  ]
-                ).map(({ v, label, color }) => (
-                  <button
-                    key={v}
-                    disabled={payBusy}
-                    onClick={() => handleClosePay(v)}
-                    style={{
-                      flex: 1, padding: "14px 0", borderRadius: 12, border: "none",
-                      background: color, color: "#fff", fontWeight: 700, fontSize: "0.9rem",
-                      cursor: payBusy ? "not-allowed" : "pointer", opacity: payBusy ? 0.6 : 1,
-                    }}
+                {hasSelection ? (
+                  <IonButton
+                    fill="outline"
+                    onClick={clearSelection}
+                    style={{ flexShrink: 0, minHeight: 52, "--border-radius": "14px", margin: 0 }}
                   >
-                    {label}
-                  </button>
-                ))}
+                    ຍົກເລີກ
+                  </IonButton>
+                ) : (
+                  <IonButton
+                    fill="outline"
+                    onClick={() => setMoreMenuOpen(true)}
+                    style={{ flexShrink: 0, minHeight: 52, "--border-radius": "14px", margin: 0, "--padding-start": "16px", "--padding-end": "16px" }}
+                  >
+                    <IonIcon slot="icon-only" icon={ellipsisHorizontalOutline} />
+                  </IonButton>
+                )}
+                <IonButton
+                  expand="block"
+                  disabled={hasSelection && selectedItems.length === 0}
+                  onClick={() => setPayModalOpen(true)}
+                  style={{ flex: 1, minHeight: 52, "--border-radius": "14px", margin: 0 }}
+                >
+                  {hasSelection ? "ຊຳລະລາຍການທີ່ເລືອກ" : "ຢືນຢັນການຊຳລະ"}
+                </IonButton>
               </div>
-              {payError && <p style={{ color: "var(--app-danger)", fontSize: "0.82rem", marginTop: 10 }}>{payError}</p>}
             </div>
           )}
         </IonFooter>
+      </IonModal>
+
+      <PayBillModal
+        isOpen={payModalOpen}
+        shopId={shopId ?? undefined}
+        tableLabel={tableLabel}
+        targets={hasSelection ? selectedTargets : unpaidOrders.map((o) => ({ saleId: o.id }))}
+        items={hasSelection ? selectedItems : unpaidOrders.flatMap((o) => o.items)}
+        subtotal={hasSelection ? selectedSubtotal : billSubtotal}
+        serviceChargePercent={billServiceChargePercent}
+        onDismiss={() => setPayModalOpen(false)}
+        onSuccess={handlePaySuccess}
+      />
+
+      {qrModal}
+
+      <IonActionSheet
+        isOpen={moreMenuOpen}
+        onDidDismiss={() => setMoreMenuOpen(false)}
+        header="ຈັດການໂຕະ"
+        buttons={[
+          { text: "ຍ້າຍໂຕະ", icon: swapHorizontalOutline, handler: () => { loadTables(); setTableAction("move"); } },
+          { text: "ຮວມໂຕະ", icon: gitMergeOutline, handler: () => { loadTables(); setTableAction("merge"); } },
+          { text: "ສ້າງ QR ໂຕະ ແລະ ລິ້ງ", icon: qrCodeOutline, handler: () => handleShowQr(tableLabel) },
+          { text: "ຍົກເລີກ", role: "cancel" },
+        ]}
+      />
+
+      <IonModal isOpen={!!tableAction} onDidDismiss={() => setTableAction(null)}>
+        <IonHeader>
+          <IonToolbar>
+            <IonTitle style={{ fontSize: "1rem" }}>
+              {tableAction === "move" ? "ຍ້າຍໄປໂຕະ (ວ່າງ)" : "ຮວມກັບໂຕະ (ບໍ່ວ່າງ)"}
+            </IonTitle>
+            <IonButtons slot="end">
+              <IonButton onClick={() => setTableAction(null)}>ປິດ</IonButton>
+            </IonButtons>
+          </IonToolbar>
+        </IonHeader>
+        <IonContent>
+          <div style={{ padding: "12px 16px 28px" }}>
+            {(() => {
+              const candidates = allTiles.filter((t) => {
+                if (tableDisplayLabel(t.label, t.zone) === tableLabel) return false;
+                return tableAction === "move"
+                  ? t.status === "available"
+                  : t.status === "busy" || t.status === "ready" || t.status === "served";
+              });
+              if (candidates.length === 0) {
+                return <EmptyState icon="🔍" title={tableAction === "move" ? "ບໍ່ມີໂຕະວ່າງ" : "ບໍ່ມີໂຕະທີ່ກຳລັງນັ່ງຢູ່"} />;
+              }
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {candidates.map((t) => (
+                    <div
+                      key={tableDisplayLabel(t.label, t.zone)}
+                      onClick={() => !tableActionBusy && handleTableActionPick(t)}
+                      style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        padding: "12px 14px", borderRadius: 12, cursor: tableActionBusy ? "default" : "pointer",
+                        border: "1px solid var(--app-border)", background: "var(--app-surface)",
+                        opacity: tableActionBusy ? 0.6 : 1,
+                      }}
+                    >
+                      <span style={{ fontWeight: 700 }}>{tableDisplayLabel(t.label, t.zone)}</span>
+                      <span style={{ fontSize: "0.78rem", color: "var(--app-text-secondary)" }}>{STATUS_LABEL[t.status].text}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </IonContent>
       </IonModal>
     </IonPage>
   );

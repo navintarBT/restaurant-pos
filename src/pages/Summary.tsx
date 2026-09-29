@@ -163,8 +163,11 @@ const Summary: React.FC = () => {
 
   // ── Today calculations ───────────────────────────────────────────────
   const tRevenue    = todaySales.reduce((s, t) => s + t.total, 0);
-  const tCash       = todaySales.filter(s => s.paymentType === "cash").reduce((s, t) => s + t.total, 0);
-  const tQR         = todaySales.filter(s => s.paymentType === "qr").reduce((s, t) => s + t.total, 0);
+  // Falls back to the whole `total` for sales recorded before the
+  // cash/transfer/credit breakdown existed.
+  const tCash       = todaySales.reduce((s, t) => s + (t.paymentCash ?? (t.paymentType === "cash" ? t.total : 0)), 0);
+  const tQR         = todaySales.reduce((s, t) => s + (t.paymentTransfer ?? (t.paymentType === "qr" ? t.total : 0)), 0);
+  const tCredit     = todaySales.reduce((s, t) => s + (t.paymentCredit ?? 0), 0);
   const tDiscount   = todaySales.reduce((s, sale) =>
     s + sale.items.reduce((is, item) => {
       if (item.isGift) return is;
@@ -310,7 +313,7 @@ const Summary: React.FC = () => {
 
               {todaySales.length > 0 && (
                 <>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: tDiscount > 0 ? 6 : 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: tCredit !== 0 ? "1fr 1fr 1fr" : "1fr 1fr", gap: 6, marginBottom: tDiscount > 0 ? 6 : 8 }}>
                     <div style={{ background: "var(--app-success-surface)", borderRadius: 9, padding: "7px 8px" }}>
                       <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>💵 ສົດ</p>
                       <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-success)" }}>{fmtK(tCash)} ກີບ</p>
@@ -319,6 +322,12 @@ const Summary: React.FC = () => {
                       <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>📱 ໂອນ</p>
                       <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-info)" }}>{fmtK(tQR)} ກີບ</p>
                     </div>
+                    {tCredit !== 0 && (
+                      <div style={{ background: "var(--app-warning-surface)", borderRadius: 9, padding: "7px 8px" }}>
+                        <p style={{ margin: 0, fontSize: "0.63rem", color: "var(--app-text-secondary)", fontWeight: 600 }}>🧾 ຕິດໜີ້</p>
+                        <p style={{ margin: "2px 0 0", fontSize: "0.84rem", fontWeight: 800, color: "var(--app-warning)" }}>{fmtK(tCredit)} ກີບ</p>
+                      </div>
+                    )}
                   </div>
                   {tDiscount > 0 && (
                     <div style={{
