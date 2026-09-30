@@ -36,7 +36,6 @@ import {
   receiptOutline,
   flameOutline,
   checkmarkDoneOutline,
-  cashOutline,
   gridOutline,
   mapOutline,
   addCircleOutline,
@@ -241,14 +240,6 @@ const MainTabs: React.FC = () => {
                     <IonLabel style={{ fontWeight: 600 }}>ຂາຍ (ໜ້າບາໂຊ/ຊື້ກັບ)</IonLabel>
                   </IonItem>
                 </IonMenuToggle>
-                {permissions.canTakeOrders && (
-                  <IonMenuToggle autoHide={false}>
-                    <IonItem button detail={false} routerLink="/tabs/check-bill" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                      <IonIcon slot="start" icon={cashOutline} color="primary" />
-                      <IonLabel style={{ fontWeight: 600 }}>ເຊັກບິນ</IonLabel>
-                    </IonItem>
-                  </IonMenuToggle>
-                )}
               </IonList>
 
               {permissions.canTakeOrders && (
@@ -772,12 +763,6 @@ const MainTabs: React.FC = () => {
             <IonTabButton tab="take-order" href="/tabs/take-order">
               <IonIcon icon={receiptOutline} />
               <IonLabel>ອໍເດີ້</IonLabel>
-            </IonTabButton>
-          )}
-          {permissions.canTakeOrders && (
-            <IonTabButton tab="check-bill" href="/tabs/check-bill">
-              <IonIcon icon={cashOutline} />
-              <IonLabel>ເຊັກບິນ</IonLabel>
             </IonTabButton>
           )}
           {permissions.canCook && (
