@@ -26,9 +26,7 @@ const ProductDetailSheet: React.FC<Props> = ({ product, canViewFinance, onDismis
   const hasCost = canViewFinance && maxC > 0;
   const [minProfit, maxProfit] = [minP - maxC, maxP - minC];
 
-  const gridCols = product.hasFlavors
-    ? (canViewFinance ? "1fr 1fr 70px 70px 70px" : "1fr 1fr 70px")
-    : (canViewFinance ? "1fr 70px 70px 70px" : "1fr 70px");
+  const gridCols = canViewFinance ? "1fr 70px 70px 70px" : "1fr 70px";
 
   return (
     <IonModal isOpen={!!product} onDidDismiss={onDismiss}>
@@ -85,8 +83,14 @@ const ProductDetailSheet: React.FC<Props> = ({ product, canViewFinance, onDismis
           </div>
 
           {(product.code || product.unit) && (
-            <p style={{ margin: "0 0 14px", fontSize: "0.75rem", color: "var(--app-text-secondary)" }}>
+            <p style={{ margin: "0 0 6px", fontSize: "0.75rem", color: "var(--app-text-secondary)" }}>
               {[product.code && `ລະຫັດ: ${product.code}`, product.unit && `ຫົວໜ່ວຍ: ${product.unit}`].filter(Boolean).join(" · ")}
+            </p>
+          )}
+
+          {product.hasFlavors && product.flavors && product.flavors.length > 0 && (
+            <p style={{ margin: "0 0 14px", fontSize: "0.75rem", color: "var(--app-text-secondary)" }}>
+              ລົດຊາດ: {product.flavors.join(", ")} (ເລືອກໄດ້ {product.maxFlavors ?? 1})
             </p>
           )}
 
@@ -131,7 +135,6 @@ const ProductDetailSheet: React.FC<Props> = ({ product, canViewFinance, onDismis
               background: "var(--app-surface-alt)", padding: "8px 14px", gap: 4,
             }}>
               <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>ຂະໜາດ</span>
-              {product.hasFlavors && <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>ລົດຊາດ</span>}
               {canViewFinance && <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)", textAlign: "right" }}>ຕົ້ນທຶນ</span>}
               <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)", textAlign: "right" }}>ລາຄາ</span>
               <span style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--app-text-secondary)", textAlign: "right" }}>ສະຕ໋ອກ</span>
@@ -156,7 +159,6 @@ const ProductDetailSheet: React.FC<Props> = ({ product, canViewFinance, onDismis
                   <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--ion-text-color)" }}>
                     {v.size}{inactive ? " (ປິດ)" : ""}
                   </span>
-                  {product.hasFlavors && <span style={{ fontSize: "0.85rem", color: "var(--app-text-secondary)" }}>{v.color}</span>}
                   {canViewFinance && (
                     <span style={{ fontSize: "0.8rem", color: "var(--app-text-secondary)", textAlign: "right" }}>
                       {fmtK(v.costPrice ?? product.costPrice ?? 0)}

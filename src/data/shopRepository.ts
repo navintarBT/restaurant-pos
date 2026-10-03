@@ -128,6 +128,28 @@ export async function setServiceChargeSettings(shopId: string, settings: Service
   });
 }
 
+/** Shop-wide VAT percentage — a plain top-level field the shop doc already
+ * carried before any of this session's work (seeded outside the app; no
+ * separate enabled flag ever existed for it), so this reads/writes that same
+ * `vatPercent` field rather than inventing a new one. 0/absent = off,
+ * matching how discountAmount/serviceChargePercent already treat 0 as "no
+ * effect" everywhere else. Applies uniformly to every bill (no per-table
+ * opt-out like service charge — it's a tax, not a discretionary fee), added
+ * on top at bill-close time (see PayBillModal.tsx/closeBill), on top of the
+ * discounted subtotal + service charge — menu prices themselves are
+ * VAT-exclusive. */
+export async function getVatPercent(shopId: string): Promise<number> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.vatPercent as number | undefined) ?? 0;
+}
+
+export async function setVatPercent(shopId: string, percent: number): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    vatPercent: Math.max(0, percent),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export interface ToppingEntry {
   name: string;
   // Extra charge for this topping, in kip. Undefined/0 = free add-on.
@@ -188,6 +210,21 @@ export async function getSizes(shopId: string): Promise<string[]> {
 export async function setSizes(shopId: string, sizes: string[]): Promise<void> {
   await updateDoc(shopDoc(shopId), {
     sizes,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Reusable flavor names (e.g. ["ເຜັດ","ບໍ່ເຜັດ","ຫວານ"]) shared across the
+ * shop's menu — a product opts a subset of these in (Product.flavors),
+ * gated the same as toppings/units/sizes. */
+export async function getFlavors(shopId: string): Promise<string[]> {
+  const snap = await getDoc(shopDoc(shopId));
+  return (snap.data()?.flavors as string[] | undefined) ?? [];
+}
+
+export async function setFlavors(shopId: string, flavors: string[]): Promise<void> {
+  await updateDoc(shopDoc(shopId), {
+    flavors,
     updatedAt: serverTimestamp(),
   });
 }

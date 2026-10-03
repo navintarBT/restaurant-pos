@@ -36,7 +36,6 @@ import {
   receiptOutline,
   flameOutline,
   checkmarkDoneOutline,
-  cashOutline,
   gridOutline,
   mapOutline,
   addCircleOutline,
@@ -52,6 +51,8 @@ import {
   returnUpBackOutline,
   colorPaletteOutline,
   printOutline,
+  cardOutline,
+  wineOutline,
 } from "ionicons/icons";
 import { CartProvider } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
@@ -64,6 +65,8 @@ const Returns = lazy(() => import("./Returns"));
 const Summary = lazy(() => import("./Summary"));
 const Finance = lazy(() => import("./Finance"));
 const SalesHistory = lazy(() => import("./SalesHistory"));
+const Debtors = lazy(() => import("./Debtors"));
+const Deposits = lazy(() => import("./Deposits"));
 const CancelBill = lazy(() => import("./CancelBill"));
 const CancelledBillHistory = lazy(() => import("./CancelledBillHistory"));
 const ShopProfileSettings = lazy(() => import("./ShopProfileSettings"));
@@ -157,6 +160,8 @@ const MainTabs: React.FC = () => {
     import("./Summary");
     import("./Finance");
     import("./SalesHistory");
+    import("./Debtors");
+    import("./Deposits");
     import("./ShopProfileSettings");
     import("./StaffSettings");
     import("./TakeOrder");
@@ -235,14 +240,6 @@ const MainTabs: React.FC = () => {
                     <IonLabel style={{ fontWeight: 600 }}>ຂາຍ (ໜ້າບາໂຊ/ຊື້ກັບ)</IonLabel>
                   </IonItem>
                 </IonMenuToggle>
-                {permissions.canTakeOrders && (
-                  <IonMenuToggle autoHide={false}>
-                    <IonItem button detail={false} routerLink="/tabs/check-bill" style={{ "--background-hover": "var(--app-accent-surface)" }}>
-                      <IonIcon slot="start" icon={cashOutline} color="primary" />
-                      <IonLabel style={{ fontWeight: 600 }}>ເຊັກບິນ</IonLabel>
-                    </IonItem>
-                  </IonMenuToggle>
-                )}
               </IonList>
 
               {permissions.canTakeOrders && (
@@ -393,7 +390,7 @@ const MainTabs: React.FC = () => {
                         <IonMenuToggle autoHide={false}>
                           <IonItem button detail={false} routerLink="/tabs/service-charge" style={{ "--background-hover": "var(--app-accent-surface)" }}>
                             <IonIcon slot="start" icon={receiptOutline} color="primary" />
-                            <IonLabel style={{ fontWeight: 600 }}>ຄ່າບໍລິການ</IonLabel>
+                            <IonLabel style={{ fontWeight: 600 }}>ຄ່າບໍລິການ & VAT</IonLabel>
                           </IonItem>
                         </IonMenuToggle>
                       )}
@@ -511,6 +508,22 @@ const MainTabs: React.FC = () => {
                     </IonItem>
                   </IonMenuToggle>
                 )}
+                {canViewFinance && (
+                  <IonMenuToggle autoHide={false}>
+                    <IonItem button detail={false} routerLink="/tabs/debtors" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                      <IonIcon slot="start" icon={cardOutline} color="primary" />
+                      <IonLabel style={{ fontWeight: 600 }}>ລູກໜີ້</IonLabel>
+                    </IonItem>
+                  </IonMenuToggle>
+                )}
+                {permissions.canTakeOrders && (
+                  <IonMenuToggle autoHide={false}>
+                    <IonItem button detail={false} routerLink="/tabs/deposits" style={{ "--background-hover": "var(--app-accent-surface)" }}>
+                      <IonIcon slot="start" icon={wineOutline} color="primary" />
+                      <IonLabel style={{ fontWeight: 600 }}>ຝາກ</IonLabel>
+                    </IonItem>
+                  </IonMenuToggle>
+                )}
               </IonList>
 
               <div style={{ padding: "14px 18px 6px", fontSize: "0.72rem", fontWeight: 700, color: "var(--app-text-muted)" }}>
@@ -582,6 +595,12 @@ const MainTabs: React.FC = () => {
           </Route>
           <Route exact path="/tabs/history">
             <Suspense fallback={<RouteFallback />}><SalesHistory /></Suspense>
+          </Route>
+          <Route exact path="/tabs/debtors">
+            <Suspense fallback={<RouteFallback />}><Debtors /></Suspense>
+          </Route>
+          <Route exact path="/tabs/deposits">
+            <Suspense fallback={<RouteFallback />}><Deposits /></Suspense>
           </Route>
           {permissions.canDeleteSales && (
             <Route exact path="/tabs/cancel-bill">
@@ -744,12 +763,6 @@ const MainTabs: React.FC = () => {
             <IonTabButton tab="take-order" href="/tabs/take-order">
               <IonIcon icon={receiptOutline} />
               <IonLabel>ອໍເດີ້</IonLabel>
-            </IonTabButton>
-          )}
-          {permissions.canTakeOrders && (
-            <IonTabButton tab="check-bill" href="/tabs/check-bill">
-              <IonIcon icon={cashOutline} />
-              <IonLabel>ເຊັກບິນ</IonLabel>
             </IonTabButton>
           )}
           {permissions.canCook && (

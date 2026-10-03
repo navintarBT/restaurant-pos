@@ -106,14 +106,14 @@ service cloud.firestore {
             || request.resource.data.profileUrl is string
           )
         )
-        // Table roster + zones + service charge + exchange rates — settings
-        // behind "ເລືອກໂຕະ" and its "ຈັດການໂຕະ" / "ຈັດການໂຊນ" pages, plus the
-        // money-at-checkout "ອັດຕາແລກປ່ຽນ" settings (gated the same as
+        // Table roster + zones + service charge + VAT + exchange rates —
+        // settings behind "ເລືອກໂຕະ" and its "ຈັດການໂຕະ" / "ຈັດການໂຊນ" pages,
+        // plus the money-at-checkout "ອັດຕາແລກປ່ຽນ" settings (gated the same as
         // service charge, not canManageProducts, since staff taking orders
         // are the ones who'd apply it).
         || (
           (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tableRoster', 'tableZones', 'serviceCharge', 'exchangeRates', 'updatedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tableRoster', 'tableZones', 'serviceCharge', 'vatPercent', 'exchangeRates', 'updatedAt'])
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['tableRoster'])
             || request.resource.data.tableRoster is list
@@ -127,19 +127,27 @@ service cloud.firestore {
             || request.resource.data.serviceCharge is map
           )
           && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['vatPercent'])
+            || request.resource.data.vatPercent is number
+          )
+          && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['exchangeRates'])
             || request.resource.data.exchangeRates is list
           )
         )
-        // Toppings + serving units + food groups + sizes + colors —
+        // Toppings + serving units + food groups + sizes + colors + flavors —
         // menu-configuration, so gated like managing products rather than
         // table/zone setup.
         || (
           (isShopOwner(shopId) || hasStaffPermission(shopId, 'canManageProducts'))
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['toppings', 'units', 'foodGroups', 'sizes', 'colors', 'updatedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['toppings', 'units', 'foodGroups', 'sizes', 'colors', 'flavors', 'updatedAt'])
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['toppings'])
             || request.resource.data.toppings is list
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['flavors'])
+            || request.resource.data.flavors is list
           )
           && (
             !request.resource.data.diff(resource.data).affectedKeys().hasAny(['units'])
@@ -208,14 +216,26 @@ service cloud.firestore {
             && 'tableSessionId' in request.resource.data
             && sessionIsOpen(shopId, request.resource.data.tableSessionId)
           )
+          // ແຍກຈ່າຍ (item-level bill split): a new doc born already paid,
+          // holding just the items split off an existing order (see
+          // closeBill's splitFromSaleId path) — same staff authority as
+          // closing a bill, not the unrestricted walk-up-sale branch above.
+          || (
+            isShopMember(shopId)
+            && validSale(request.resource.data)
+            && 'splitFromSaleId' in request.resource.data
+            && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
+          )
         );
         // Every allowed update touches a distinct, narrow field set — mirrors
         // the UI gates exactly, and each stage of the dine-in lifecycle can
         // only ever move forward one step, never skip ahead or backward.
         allow update: if isControlAdmin() || (isTenantActive(shopId) && (
-          // Price edit / split-price / partial item removal (SalesHistory)
+          // Price edit / split-price / partial item removal (SalesHistory),
+          // or shrinking an order down to its unselected remainder after
+          // ແຍກຈ່າຍ splits off part of it into a new paid doc (closeBill).
           (
-            (isShopOwner(shopId) || (isShopMember(shopId) && (hasStaffPermission(shopId, 'canEditCartPrice') || hasStaffPermission(shopId, 'canDeleteSales'))))
+            (isShopOwner(shopId) || (isShopMember(shopId) && (hasStaffPermission(shopId, 'canEditCartPrice') || hasStaffPermission(shopId, 'canDeleteSales') || hasStaffPermission(shopId, 'canTakeOrders'))))
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items', 'total'])
             && request.resource.data.total is number
             && request.resource.data.total >= 0
@@ -237,12 +257,19 @@ service cloud.firestore {
           )
           // Close bill: served -> paid (records the payment). May also fold a
           // service-charge line item into `items`/`total` on exactly one of
-          // the table's tickets at the same time (see closeBill()).
+          // the table's tickets at the same time (see closeBill()). The
+          // paymentCash/Transfer/Credit breakdown always sums to `total`
+          // regardless of paymentType, plus billNumber and, for split/credit,
+          // which customer it's against.
           || (
             (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'paymentType', 'paidAt', 'items', 'total'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'paymentType', 'paidAt', 'items', 'total',
+              'paymentCash', 'paymentTransfer', 'paymentCredit',
+              'customerId', 'customerName', 'billNumber'
+            ])
             && resource.data.status != 'paid' && request.resource.data.status == 'paid'
-            && request.resource.data.paymentType in ['cash', 'qr']
+            && request.resource.data.paymentType in ['cash', 'qr', 'split', 'credit']
             && (
               !request.resource.data.diff(resource.data).affectedKeys().hasAny(['total'])
               || (request.resource.data.total is number && request.resource.data.total >= 0)
@@ -257,12 +284,61 @@ service cloud.firestore {
             && resource.data.status != 'cancelled' && request.resource.data.status == 'cancelled'
             && request.resource.data.cancelReason is string
           )
+          // ຮວມໂຕະ (mergeSessions): repoint an order onto a different session
+          // when two separately-opened tables turn out to be the same party —
+          // same staff authority as opening/closing tables.
+          || (
+            (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tableSessionId', 'tableLabel'])
+          )
         ));
         allow delete: if isControlAdmin()
           || (isTenantActive(shopId) && (
             isShopOwner(shopId)
             || (isShopMember(shopId) && hasStaffPermission(shopId, 'canDeleteSales'))
           ));
+      }
+
+      // Per-day sequential bill-number counter (dateKey "DDMMYY" -> {count}),
+      // bumped atomically inside closeBill()'s transaction so two staff
+      // closing bills at the same moment can never collide on one number.
+      match /billCounters/{dateKey} {
+        allow read, write: if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'));
+      }
+
+      // Running ຕິດໜີ້ (credit/tab) balance per customer. Only ever changed
+      // via closeBill()'s credit charge or chargeCredit()/recordCreditPayment()
+      // (creditRepository.ts), each of which also appends a matching
+      // creditTransactions entry in the same transaction — never deleted,
+      // since a customer's balance history should always be reconstructable.
+      match /customerCredits/{customerId} {
+        allow read:           if isControlAdmin() || isShopMember(shopId);
+        allow create, update: if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'));
+        allow delete:         if false;
+      }
+
+      // Append-only ledger backing customerCredits — a mistaken charge or
+      // payment is corrected with an offsetting entry, not an edit or delete,
+      // so the balance and the ledger it was computed from can never diverge.
+      match /creditTransactions/{transactionId} {
+        allow read:           if isControlAdmin() || isShopMember(shopId);
+        allow create:         if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'));
+        allow update, delete: if false;
+      }
+
+      // ຝາກ (bottle-keeping): running quantity-in-storage per (customer,
+      // product), same paired running-doc + append-only-ledger pattern as
+      // customerCredits/creditTransactions above.
+      match /productDeposits/{depositId} {
+        allow read:           if isControlAdmin() || isShopMember(shopId);
+        allow create, update: if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'));
+        allow delete:         if false;
+      }
+
+      match /depositTransactions/{transactionId} {
+        allow read:           if isControlAdmin() || isShopMember(shopId);
+        allow create:         if isTenantActive(shopId) && (isShopOwner(shopId) || hasStaffPermission(shopId, 'canTakeOrders'));
+        allow update, delete: if false;
       }
 
       match /expenses/{expenseId} {
@@ -458,7 +534,7 @@ service cloud.firestore {
       return data.keys().hasAll(['items', 'total', 'paymentType', 'createdAt'])
         && data.total is number
         && data.total > 0
-        && (data.paymentType == 'cash' || data.paymentType == 'qr')
+        && data.paymentType in ['cash', 'qr', 'split', 'credit']
         && data.status == 'paid';
     }
 

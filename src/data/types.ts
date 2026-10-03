@@ -20,9 +20,10 @@ export interface ReturnRecord {
 
 export interface ProductVariant {
   size: string;
-  // Flavor name (from Product.flavors) when Product.hasFlavors is true;
-  // otherwise "" — was previously a freeform "option" text field (spice
-  // level / no-ice / etc.), see the flavor-auto-migration note on Product.
+  // LEGACY — freeform "option" text (spice level / no-ice / etc.) from
+  // before the dedicated flavor/topping systems existed. No longer written
+  // by ProductForm (always ""); flavor does NOT split price/stock per
+  // flavor — one shared price/stock per size, see Product.hasFlavors.
   color: string;
   stock: number;
   // LEGACY — superseded by Product.reorderPoint (one value per product
@@ -59,11 +60,11 @@ export interface Product {
   needsKitchen?: boolean;
   // Product code / SKU, freeform.
   code?: string;
-  // Absent/"regular" = a normal menu item; "promotion" = tagged as a promo.
-  // "bundle"/set items are never represented here — picking that option in
-  // ProductForm redirects into the separate Bundle system (BundleManager.tsx)
-  // instead of persisting onto a Product doc.
-  productType?: "regular" | "promotion";
+  // Absent/"regular" = a normal menu item; "promotion" = tagged as a promo;
+  // "bundle" = tagged as a set/combo item — a plain classification tag, not
+  // a link to the separate Bundle/BundleItem system (BundleManager.tsx),
+  // which still exists independently for multi-item combos.
+  productType?: "regular" | "bundle" | "promotion";
   // From the shop's reusable Units list (getUnits/setUnits).
   unit?: string;
   // Low-stock threshold, one value for the whole product (replaces the old
@@ -73,10 +74,15 @@ export interface Product {
   // alerts; explicitly false = excluded regardless of actual stock levels.
   alertEnabled?: boolean;
   // Product-scoped flavor system (distinct from the shop-wide Toppings
-  // list). When true, each variant's `color` is picked from `flavors`
-  // instead of typed freeform.
+  // list) — a capped multi-select the customer picks from `flavors` at
+  // order time; one shared price/stock per size regardless of which (or how
+  // many) flavors are picked — flavor never splits the variant grid.
+  // maxFlavors undefined/0 defaults to 1 (pick exactly one) when read.
+  // Selecting flavors at order time is not wired up yet — this only stores
+  // the product's configuration (mirrors hasToppings/toppingNames below).
   hasFlavors?: boolean;
   flavors?: string[];
+  maxFlavors?: number;
   // Absent/true = normal stock deduction on sale (today's behavior).
   // Explicitly false = this product's stock is never validated or deducted
   // at sale time, regardless of the quantity sold or each variant's `stock`
@@ -126,6 +132,13 @@ export interface SaleItem {
   // costPrice) so createOrder can split a cart into kitchen/direct tickets
   // without an extra product lookup.
   needsKitchen?: boolean;
+  // Picked in VariantPicker.tsx when Product.hasFlavors/hasToppings is on —
+  // applies uniformly to this whole line (flavor/topping never split
+  // price/stock, see Product.hasFlavors); topping price add-ons are already
+  // folded into `unitPrice`. Two lines of the same variant with different
+  // picks stay separate cart lines (see each page's itemKey).
+  selectedFlavors?: string[];
+  selectedToppings?: string[];
 }
 
 export interface TableSession {
@@ -200,6 +213,64 @@ export interface Customer {
   enabled: boolean;
 }
 
+// ຕິດໜີ້ (credit/tab) balance for one customer — positive = they owe the
+// shop this much. One doc per customer; balance is only ever changed via
+// chargeCredit/recordCreditPayment (creditRepository.ts), never written
+// directly, so it always matches the sum of that customer's CreditTransactions.
+export interface CustomerCredit {
+  id: string; // == customerId
+  customerId: string;
+  customerName: string;
+  balance: number;
+  updatedAt: Date;
+}
+
+// One ledger entry for a CustomerCredit — "charge" adds to the balance (a
+// credit sale), "payment" reduces it (the customer paying down their tab).
+export interface CreditTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  type: "charge" | "payment";
+  amount: number;
+  saleId?: string; // set when type === "charge"
+  billNumber?: string;
+  note?: string;
+  createdAt: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}
+
+// ຝາກ (bottle-keeping): how much of one product a customer currently has in
+// storage at the shop. One doc per (customerId, productId) pair; quantity is
+// only ever changed via depositProduct/withdrawProduct (depositRepository.ts),
+// so it always matches the sum of that pair's DepositTransactions.
+export interface ProductDeposit {
+  id: string; // `${customerId}_${productId}`
+  customerId: string;
+  customerName: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  updatedAt: Date;
+}
+
+// One ledger entry for a ProductDeposit — "deposit" adds to the quantity,
+// "withdraw" reduces it (the customer taking some of it back).
+export interface DepositTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  productId: string;
+  productName: string;
+  type: "deposit" | "withdraw";
+  quantity: number;
+  note?: string;
+  createdAt: Date;
+  createdByUid?: string;
+  createdByName?: string;
+}
+
 export interface ShopProfile {
   id: string;
   name: string;
@@ -238,7 +309,13 @@ export interface ShopUser {
   allowedZones?: string[];
 }
 
-export type PaymentType = "cash" | "qr";
+// "qr" is the internal value for transfer payments (labeled ໂອນ everywhere)
+// — kept as-is rather than renamed, to avoid touching every existing
+// paymentType === "qr" comparison across reports/history for no real gain.
+// "split" = part cash + part transfer (Sale.paymentCash/.paymentTransfer);
+// "credit" = charged (in full or in part) to the customer's tab
+// (Sale.paymentCredit + customerId — see CustomerCredit/CreditTransaction).
+export type PaymentType = "cash" | "qr" | "split" | "credit";
 
 // Was a fixed 3-value union; widened to allow custom categories (see
 // src/data/expenseCategoryRepository.ts). "shop"/"capital"/"general" are
@@ -291,4 +368,25 @@ export interface Sale {
   cancelledAt?: Date;
   cancelledByUid?: string;
   cancelledByName?: string;
+  // Every payment is describable as a breakdown that sums to `total`,
+  // regardless of paymentType — keeps reporting uniform across all 4 modes
+  // (e.g. cashTotal = Σ paymentCash) instead of branching on paymentType.
+  paymentCash?: number;
+  paymentTransfer?: number;
+  paymentCredit?: number; // portion charged to customerId's tab
+  customerId?: string;    // set when paymentCredit > 0
+  customerName?: string;
+  billNumber?: string;    // "DDMMYY-NNNN", assigned atomically in closeBill
+  // Set only on a doc born by splitting off part of an existing order's
+  // items during item-level bill-splitting (ແຍກຈ່າຍ) — see closeBill.
+  splitFromSaleId?: string;
+}
+
+// Addressing for closeBill: which doc(s)/items a single payment event
+// covers. Omitting itemIndexes means "the whole doc" (today's original
+// behavior); a subset means "shrink the original doc to its remainder and
+// spin off a new paid doc for just these items" — see closeBill.
+export interface BillTarget {
+  saleId: string;
+  itemIndexes?: number[];
 }

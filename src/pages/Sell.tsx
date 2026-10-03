@@ -90,9 +90,9 @@ const Sell: React.FC = () => {
     ? productsEffective
     : productsEffective.filter((p) => p.category === activeCategory);
 
-  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number }[]) {
+  function handleAddToCart(items: { variant: ProductVariant; quantity: number; unitPrice: number; costPrice?: number; selectedFlavors?: string[]; selectedToppings?: string[] }[]) {
     if (!pickerProduct) return;
-    items.forEach(({ variant, quantity, unitPrice, costPrice }) => {
+    items.forEach(({ variant, quantity, unitPrice, costPrice, selectedFlavors, selectedToppings }) => {
       addItem({
         productId: pickerProduct.id,
         productName: pickerProduct.name,
@@ -101,6 +101,10 @@ const Sell: React.FC = () => {
         originalPrice: unitPrice,
         unitPrice,
         costPrice,
+        // Firestore rejects `undefined` field values outright — only attach
+        // these when something was actually picked.
+        ...(selectedFlavors ? { selectedFlavors } : {}),
+        ...(selectedToppings ? { selectedToppings } : {}),
       });
     });
   }
@@ -480,7 +484,7 @@ const Sell: React.FC = () => {
         )}
       </IonContent>
 
-      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct}
+      <VariantPicker product={pickerProduct} isOpen={!!pickerProduct} shopId={shopId ?? undefined}
         onAdd={handleAddToCart} onDismiss={() => setPickerProduct(null)} />
       <CartSheet isOpen={cartOpen} products={products} onCheckout={openCheckout} onDismiss={() => setCartOpen(false)} />
       <CheckoutModal isOpen={checkoutOpen} onDismiss={() => setCheckoutOpen(false)}

@@ -33,6 +33,8 @@ function saleLineKey(item: Sale["items"][number]): string {
 const PAYMENT_BADGE: Record<PaymentType, { label: string; bg: string; color: string }> = {
   cash: { label: "💵 ສົດ", bg: "var(--app-success-surface)", color: "var(--app-success)" },
   qr: { label: "📱 ໂອນ", bg: "var(--app-info-surface)", color: "var(--app-info)" },
+  split: { label: "🔀 ສົດ+ໂອນ", bg: "var(--app-accent-surface)", color: "var(--ion-color-primary)" },
+  credit: { label: "🧾 ຕິດໜີ້", bg: "var(--app-warning-surface)", color: "var(--app-warning)" },
 };
 
 interface StatCardProps {
@@ -191,8 +193,12 @@ const SalesHistory: React.FC = () => {
   const paidSales = sales.filter((s) => s.status === "paid");
 
   const totalRevenue = paidSales.reduce((s, t) => s + t.total, 0);
-  const cashTotal = paidSales.filter((s) => s.paymentType === "cash").reduce((s, t) => s + t.total, 0);
-  const qrTotal = paidSales.filter((s) => s.paymentType === "qr").reduce((s, t) => s + t.total, 0);
+  // Falls back to the whole `total` for sales recorded before the
+  // cash/transfer/credit breakdown existed (paymentCash/.paymentTransfer
+  // unset, but paymentType still says which single method it was).
+  const cashTotal = paidSales.reduce((s, t) => s + (t.paymentCash ?? (t.paymentType === "cash" ? t.total : 0)), 0);
+  const qrTotal = paidSales.reduce((s, t) => s + (t.paymentTransfer ?? (t.paymentType === "qr" ? t.total : 0)), 0);
+  const creditTotal = paidSales.reduce((s, t) => s + (t.paymentCredit ?? 0), 0);
   const itemCount = paidSales.reduce((s, sale) => s + sale.items.reduce((is, i) => is + i.quantity, 0), 0);
   const totalDiscount = paidSales.reduce((s, sale) =>
     s + sale.items.reduce((is, item) => {
@@ -431,10 +437,16 @@ const SalesHistory: React.FC = () => {
                     <StatCard label="ເງິນສົດ" value={`${fmtK(cashTotal)} ກີບ`}
                       icon="💵" bg="var(--app-success-surface)" color="var(--app-success)" />
                   </IonCol>
-                  <IonCol style={{ paddingRight: 0, paddingLeft: 4 }}>
+                  <IonCol style={{ paddingRight: creditTotal !== 0 ? 4 : 0, paddingLeft: 4 }}>
                     <StatCard label="ໂອນ" value={`${fmtK(qrTotal)} ກີບ`}
                       icon="📱" bg="var(--app-info-surface)" color="var(--app-info)" />
                   </IonCol>
+                  {creditTotal !== 0 && (
+                    <IonCol style={{ paddingRight: 0, paddingLeft: 4 }}>
+                      <StatCard label="ຕິດໜີ້" value={`${fmtK(creditTotal)} ກີບ`}
+                        icon="🧾" bg="var(--app-warning-surface)" color="var(--app-warning)" />
+                    </IonCol>
+                  )}
                 </IonRow>
               </IonGrid>
 
@@ -677,7 +689,7 @@ const SalesHistory: React.FC = () => {
                 color: PAYMENT_BADGE[selectedSale.paymentType!].color,
                 borderRadius: 8, padding: "4px 12px", fontWeight: 700, fontSize: "0.85rem",
               }}>
-                {selectedSale.paymentType === "cash" ? "💵 ເງິນສົດ" : "📱 ໂອນ"}
+                {PAYMENT_BADGE[selectedSale.paymentType!].label}
               </span>
             </div>
 

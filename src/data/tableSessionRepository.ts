@@ -7,12 +7,17 @@ import {
   query,
   where,
   Timestamp,
+  runTransaction,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import type { TableSession } from "./types";
 
 function sessionsCol(shopId: string) {
   return collection(db, "shops", shopId, "tableSessions");
+}
+
+function salesCol(shopId: string) {
+  return collection(db, "shops", shopId, "sales");
 }
 
 function fromDoc(d: import("firebase/firestore").QueryDocumentSnapshot): TableSession {
@@ -65,5 +70,37 @@ export async function closeSession(shopId: string, sessionId: string): Promise<v
   await updateDoc(doc(sessionsCol(shopId), sessionId), {
     status: "closed",
     closedAt: Timestamp.now(),
+  });
+}
+
+/** ຍ້າຍໂຕະ — moves an open session to a different (previously empty) table.
+ * `Sale.tableSessionId` (not tableLabel) is the real link to a session's
+ * orders, so renaming here never orphans anything already sent. */
+export async function moveSession(shopId: string, sessionId: string, newTableLabel: string): Promise<void> {
+  await updateDoc(doc(sessionsCol(shopId), sessionId), { tableLabel: newTableLabel });
+}
+
+/**
+ * ຮວມໂຕະ — combines two separately-opened tables into one bill: every order
+ * under `absorbedSessionId` is repointed onto `survivingSessionId` (and its
+ * denormalized tableLabel updated to match), then the absorbed session is
+ * closed since it no longer represents a separately-billable tab.
+ */
+export async function mergeSessions(
+  shopId: string,
+  absorbedSessionId: string,
+  survivingSessionId: string,
+  survivingTableLabel: string
+): Promise<void> {
+  const q = query(salesCol(shopId), where("tableSessionId", "==", absorbedSessionId));
+  const snap = await getDocs(q);
+  const saleRefs = snap.docs.map((d) => doc(salesCol(shopId), d.id));
+
+  await runTransaction(db, async (tx) => {
+    await Promise.all(saleRefs.map((ref) => tx.get(ref)));
+    for (const ref of saleRefs) {
+      tx.update(ref, { tableSessionId: survivingSessionId, tableLabel: survivingTableLabel });
+    }
+    tx.update(doc(sessionsCol(shopId), absorbedSessionId), { status: "closed", closedAt: Timestamp.now() });
   });
 }

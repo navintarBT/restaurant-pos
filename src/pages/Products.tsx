@@ -52,7 +52,6 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
   const [restockTarget, setRestockTarget] = useState<Product | null>(null);
   const [activeCategory, setActiveCategory] = useState("all");
   const [productTab, setProductTab] = useState<"retail" | "bundle">("retail");
-  const [bundleCreateSignal, setBundleCreateSignal] = useState(0);
 
   const isAdmin = permissions.canManageProducts;
   const isOwner = role === "customer";
@@ -164,7 +163,7 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         )}
 
         {productTab === "bundle" ? (
-          shopId && <BundleManager products={products} shopId={shopId} isOwner={isOwner} autoOpenCreateSignal={bundleCreateSignal} />
+          shopId && <BundleManager products={products} shopId={shopId} isOwner={isOwner} />
         ) : (
         <>
         {loading && (
@@ -268,11 +267,6 @@ const Products: React.FC<Props> = ({ onStockChanged }) => {
         isOwner={isOwner}
         onSave={handleSave}
         onDismiss={() => setFormOpen(false)}
-        onRequestBundle={() => {
-          setFormOpen(false);
-          setProductTab("bundle");
-          setBundleCreateSignal((n) => n + 1);
-        }}
         onCategoryChanged={(cats) => setCategories(cats)}
         onCategoryRenamed={(oldName, newName) =>
           setProducts((prev) => prev.map((p) => p.category === oldName ? { ...p, category: newName } : p))

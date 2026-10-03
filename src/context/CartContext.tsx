@@ -16,8 +16,10 @@ type CartAction =
   | { type: "REMOVE"; key: string }
   | { type: "CLEAR" };
 
-function itemKey(item: Pick<CartItem, "productId" | "variant" | "splitId" | "giftForKey">) {
-  const base = `${item.productId}__${item.variant.size}__${item.variant.color}`;
+function itemKey(item: Pick<CartItem, "productId" | "variant" | "splitId" | "giftForKey" | "selectedFlavors" | "selectedToppings">) {
+  const flavorPart = (item.selectedFlavors ?? []).slice().sort().join(",");
+  const toppingPart = (item.selectedToppings ?? []).slice().sort().join(",");
+  const base = `${item.productId}__${item.variant.size}__${item.variant.color}__${flavorPart}__${toppingPart}`;
   const withSplit = item.splitId ? `${base}__${item.splitId}` : base;
   return item.giftForKey ? `${withSplit}__gift-for-${item.giftForKey}` : withSplit;
 }

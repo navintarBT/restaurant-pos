@@ -112,6 +112,8 @@ const Kitchen: React.FC = () => {
                     <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
                       <span style={{ color: "var(--ion-text-color)" }}>
                         {item.productName}{item.variant.color && item.variant.color !== "__bundle__" ? ` (${item.variant.size}/${item.variant.color})` : item.variant.size ? ` (${item.variant.size})` : ""}
+                        {item.selectedFlavors?.length ? ` · ${item.selectedFlavors.join("+")}` : ""}
+                        {item.selectedToppings?.length ? ` · ${item.selectedToppings.join(", ")}` : ""}
                       </span>
                       <span style={{ fontWeight: 700, color: "var(--ion-color-primary)" }}>×{item.quantity}</span>
                     </div>

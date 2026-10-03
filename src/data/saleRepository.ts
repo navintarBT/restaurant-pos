@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocFromCache,
   getDocs,
   query,
@@ -12,9 +13,10 @@ import {
   updateDoc,
   onSnapshot,
   serverTimestamp,
+  type DocumentReference,
 } from "firebase/firestore";
 import { db } from "../firebase";
-import type { Sale, SaleItem, OrderStatus, PaymentType } from "./types";
+import type { Sale, SaleItem, OrderStatus, PaymentType, BillTarget } from "./types";
 
 interface StockChange {
   productId: string;
@@ -286,21 +288,285 @@ export async function advanceOrderStatus(
  * revenue report — which just sums Sale.total / iterates Sale.items — picks
  * it up automatically, with no separate service-charge plumbing needed.
  */
+function billCountersCol(shopId: string) {
+  return collection(db, "shops", shopId, "billCounters");
+}
+
+function creditTransactionsCol(shopId: string) {
+  return collection(db, "shops", shopId, "creditTransactions");
+}
+
+function customerCreditsCol(shopId: string) {
+  return collection(db, "shops", shopId, "customerCredits");
+}
+
+/** "DDMMYY" in the shop's local time — the bill-number sequence resets once per day on this key. */
+function todayKey(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}${pad(d.getMonth() + 1)}${String(d.getFullYear()).slice(-2)}`;
+}
+
+/** Display-only peek at the bill number a close-bill right now would likely get — not a hold, just a preview (see closeBill for the authoritative, race-safe assignment). */
+export async function peekNextBillNumber(shopId: string): Promise<string> {
+  const key = todayKey();
+  const snap = await getDocFromCacheOrServer(doc(billCountersCol(shopId), key));
+  const count = (snap?.data()?.count as number | undefined) ?? 0;
+  return `${key}-${String(count + 1).padStart(4, "0")}`;
+}
+
+async function getDocFromCacheOrServer(ref: DocumentReference) {
+  try {
+    return await getDocFromCache(ref);
+  } catch {
+    try { return await getDoc(ref); } catch { return null; }
+  }
+}
+
+function itemsTotal(items: SaleItem[]): number {
+  return items.reduce((s, it) => s + it.unitPrice * it.quantity, 0);
+}
+
+/**
+ * Splits `amount` across `weights` (each doc's own total) so the integer
+ * shares always sum to EXACTLY `amount` — rounds every share, then dumps
+ * whatever rounding leftover remains onto the last one. Used to distribute
+ * one payment across every Sale doc a single closeBill() call touches, so
+ * Σ paymentCash (etc.) across docs reconciles with what was actually paid
+ * instead of the full amount being stamped onto every doc.
+ */
+function distribute(amount: number, weights: number[], grandTotal: number): number[] {
+  if (!amount || weights.length === 0) return weights.map(() => 0);
+  if (weights.length === 1 || grandTotal <= 0) return [amount, ...weights.slice(1).map(() => 0)];
+  const shares = weights.map((w) => Math.round((amount * w) / grandTotal));
+  const leftover = amount - shares.reduce((s, x) => s + x, 0);
+  shares[shares.length - 1] += leftover;
+  return shares;
+}
+
+/**
+ * Closes a bill — assigns a sequential "DDMMYY-NNNN" bill number and, if any
+ * of the payment is on credit, charges the customer's tab — all inside one
+ * transaction so a bill can never close without its credit charge (or vice
+ * versa). `payment`'s three fields need not be mutually exclusive (ສົດ+ໂອນ
+ * uses cash+transfer; ຕິດໜີ້ can mix a partial cash/transfer payment with the
+ * remainder on credit).
+ *
+ * Each target is either a WHOLE ticket (`itemIndexes` omitted — closes that
+ * doc in place, today's original behavior) or a SUBSET of one ticket's items
+ * (ແຍກຈ່າຍ item-level split): the source doc is shrunk to its unselected
+ * remainder (stays open, untouched otherwise) and a new doc is born already
+ * `status:"paid"` for just the selected items. `serviceChargePercent`, when
+ * given, is computed fresh against whatever subtotal THIS payment covers and
+ * folded into one resulting doc — every existing revenue report just sums
+ * Sale.total/items, so this is how the service-charge amount gets counted
+ * without separate plumbing. The cash/transfer/credit breakdown is then
+ * distributed proportionally across every resulting doc (see distribute()).
+ * `discountAmount`, when given, is folded in the same way but FIRST — a
+ * negative line item — so the service charge that follows is computed on
+ * the already-discounted subtotal, matching how staff expect ສ່ວນຫຼຸດ to work.
+ * `vatPercent`, when given, is folded in LAST — on top of the discounted
+ * subtotal AND the service charge — since menu prices are VAT-exclusive and
+ * VAT applies uniformly to every bill (no per-table opt-out like service
+ * charge has).
+ */
 export async function closeBill(
   shopId: string,
-  saleIds: string[],
+  targets: BillTarget[],
   paymentType: PaymentType,
-  serviceCharge?: { saleId: string; items: SaleItem[]; total: number }
-): Promise<void> {
-  const batch = writeBatch(db);
-  const paidAt = Timestamp.now();
-  for (const saleId of saleIds) {
-    const extra = serviceCharge && serviceCharge.saleId === saleId
-      ? { items: serviceCharge.items, total: serviceCharge.total }
-      : {};
-    batch.update(doc(salesCol(shopId), saleId), { paymentType, status: "paid", paidAt, ...extra });
+  payment: { cash?: number; transfer?: number; credit?: number },
+  customer?: { id: string; name: string },
+  serviceChargePercent?: number,
+  discountAmount?: number,
+  vatPercent?: number
+): Promise<{ billNumber: string }> {
+  const key = todayKey();
+  const counterRef = doc(billCountersCol(shopId), key);
+  const creditAmount = payment.credit ?? 0;
+  const creditRef = creditAmount > 0 && customer ? doc(customerCreditsCol(shopId), customer.id) : null;
+
+  interface PaidDoc {
+    ref: DocumentReference;
+    isNew: boolean;
+    items: SaleItem[];
+    total: number;
+    itemsChanged: boolean;
+    base?: Record<string, unknown>;
   }
-  await batch.commit();
+
+  return runTransaction(db, async (tx) => {
+    // Phase 1: reads — every target doc, plus the counter/credit docs, all
+    // before any write (Firestore transactions require reads-before-writes).
+    const counterSnap = await tx.get(counterRef);
+    const creditSnap = creditRef ? await tx.get(creditRef) : null;
+    const saleSnaps = await Promise.all(targets.map((t) => tx.get(doc(salesCol(shopId), t.saleId))));
+
+    const nextCount = ((counterSnap.data()?.count as number | undefined) ?? 0) + 1;
+    const billNumber = `${key}-${String(nextCount).padStart(4, "0")}`;
+
+    // Phase 2: compute the resulting paid docs (and any shrink writes) from
+    // each target + its fresh snapshot.
+    const paidDocs: PaidDoc[] = [];
+    const shrinkWrites: { ref: DocumentReference; items: SaleItem[]; total: number }[] = [];
+
+    targets.forEach((t, i) => {
+      const snap = saleSnaps[i];
+      if (!snap.exists()) return; // vanished concurrently — skip, same tolerance as removeItemFromSale
+      const data = snap.data();
+      const freshItems = (data.items ?? []) as SaleItem[];
+
+      if (!t.itemIndexes || t.itemIndexes.length >= freshItems.length) {
+        paidDocs.push({ ref: snap.ref, isNew: false, items: freshItems, total: itemsTotal(freshItems), itemsChanged: false });
+        return;
+      }
+      const idxSet = new Set(t.itemIndexes);
+      const selected = freshItems.filter((_, idx) => idxSet.has(idx));
+      const remaining = freshItems.filter((_, idx) => !idxSet.has(idx));
+      shrinkWrites.push({ ref: snap.ref, items: remaining, total: itemsTotal(remaining) });
+      paidDocs.push({
+        ref: doc(salesCol(shopId)),
+        isNew: true,
+        items: selected,
+        total: itemsTotal(selected),
+        itemsChanged: false,
+        base: {
+          tableSessionId: data.tableSessionId,
+          tableLabel: data.tableLabel,
+          sellerUid: data.sellerUid,
+          sellerName: data.sellerName,
+          createdAt: data.createdAt,
+          splitFromSaleId: t.saleId,
+        },
+      });
+    });
+
+    if (paidDocs.length === 0) throw new Error("closeBill: no targets resolved to a live sale doc");
+
+    // Phase 3a: fold the end-of-bill discount (if any) into one resulting
+    // doc FIRST — a negative line item, same mechanism as the service-charge
+    // fold below, just subtracting instead of adding.
+    if (discountAmount && discountAmount > 0) {
+      const target = paidDocs[0];
+      target.items = [
+        ...target.items,
+        {
+          productId: "__discount__",
+          productName: "ສ່ວນຫຼຸດ",
+          variant: { size: "", color: "", stock: 0 },
+          quantity: 1,
+          originalPrice: -discountAmount,
+          unitPrice: -discountAmount,
+          costPrice: 0,
+          needsKitchen: false,
+        } as SaleItem,
+      ];
+      target.total -= discountAmount;
+      target.itemsChanged = true;
+    }
+
+    // Phase 3b: fold the service charge into one resulting doc, computed on
+    // whatever the discounted subtotal above already is.
+    const grandSubtotal = paidDocs.reduce((s, d) => s + d.total, 0);
+    const serviceChargeAmount = serviceChargePercent ? Math.round(grandSubtotal * serviceChargePercent / 100) : 0;
+    if (serviceChargeAmount > 0) {
+      const target = paidDocs[0];
+      target.items = [
+        ...target.items,
+        {
+          productId: "__service_charge__",
+          productName: `ຄ່າບໍລິການ (${serviceChargePercent}%)`,
+          variant: { size: "", color: "", stock: 0 },
+          quantity: 1,
+          originalPrice: serviceChargeAmount,
+          unitPrice: serviceChargeAmount,
+          costPrice: 0,
+          needsKitchen: false,
+        } as SaleItem,
+      ];
+      target.total += serviceChargeAmount;
+      target.itemsChanged = true;
+    }
+
+    // Phase 3c: fold VAT in last, on top of the discounted subtotal AND the
+    // service charge — menu prices are VAT-exclusive, so this is added, not
+    // extracted from, what's already there.
+    const vatAmount = vatPercent ? Math.round((grandSubtotal + serviceChargeAmount) * vatPercent / 100) : 0;
+    if (vatAmount > 0) {
+      const target = paidDocs[0];
+      target.items = [
+        ...target.items,
+        {
+          productId: "__vat__",
+          productName: `VAT (${vatPercent}%)`,
+          variant: { size: "", color: "", stock: 0 },
+          quantity: 1,
+          originalPrice: vatAmount,
+          unitPrice: vatAmount,
+          costPrice: 0,
+          needsKitchen: false,
+        } as SaleItem,
+      ];
+      target.total += vatAmount;
+      target.itemsChanged = true;
+    }
+    const grandTotal = grandSubtotal + serviceChargeAmount + vatAmount;
+
+    // Phase 4: distribute the payment breakdown proportionally across docs.
+    const weights = paidDocs.map((d) => d.total);
+    const cashShares = distribute(payment.cash ?? 0, weights, grandTotal);
+    const transferShares = distribute(payment.transfer ?? 0, weights, grandTotal);
+    const creditShares = distribute(creditAmount, weights, grandTotal);
+
+    // Phase 5: writes.
+    tx.set(counterRef, { count: nextCount }, { merge: true });
+
+    for (const s of shrinkWrites) tx.update(s.ref, { items: s.items, total: s.total });
+
+    if (creditRef && customer && creditAmount > 0) {
+      const prevBalance = (creditSnap?.data()?.balance as number | undefined) ?? 0;
+      tx.set(creditRef, {
+        customerId: customer.id,
+        customerName: customer.name,
+        balance: prevBalance + creditAmount,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      tx.set(doc(creditTransactionsCol(shopId)), {
+        customerId: customer.id,
+        customerName: customer.name,
+        type: "charge",
+        amount: creditAmount,
+        saleId: paidDocs[0].ref.id,
+        billNumber,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    const paidAt = Timestamp.now();
+    paidDocs.forEach((d, i) => {
+      const paymentFields: Record<string, unknown> = {};
+      if (cashShares[i]) paymentFields.paymentCash = cashShares[i];
+      if (transferShares[i]) paymentFields.paymentTransfer = transferShares[i];
+      if (creditShares[i]) paymentFields.paymentCredit = creditShares[i];
+      if (customer && creditShares[i]) {
+        paymentFields.customerId = customer.id;
+        paymentFields.customerName = customer.name;
+      }
+      const itemsExtra = d.itemsChanged ? { items: d.items, total: d.total } : {};
+
+      if (d.isNew) {
+        tx.set(d.ref, {
+          ...d.base, items: d.items, total: d.total,
+          status: "paid", paymentType, paidAt, billNumber, ...paymentFields,
+        });
+      } else {
+        tx.update(d.ref, {
+          status: "paid", paymentType, paidAt, billNumber, ...paymentFields, ...itemsExtra,
+        });
+      }
+    });
+
+    return { billNumber };
+  });
 }
 
 /**

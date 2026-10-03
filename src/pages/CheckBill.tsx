@@ -16,12 +16,13 @@ import {
 } from "@ionic/react";
 import { useAuth } from "../context/AuthContext";
 import { getOpenSessions, closeSession } from "../data/tableSessionRepository";
-import { getOrdersBySession, closeBill } from "../data/saleRepository";
+import { getOrdersBySession } from "../data/saleRepository";
 import { getTableRoster, getServiceChargeSettings, tableDisplayLabel } from "../data/shopRepository";
 import { fmtK } from "../utils/format";
 import ShopHeaderTag from "../components/ShopHeaderTag";
 import EmptyState from "../components/EmptyState";
-import type { PaymentType, Sale, SaleItem, TableSession } from "../data/types";
+import PayBillModal from "../components/PayBillModal";
+import type { Sale, TableSession } from "../data/types";
 
 interface TableBill {
   session: TableSession;
@@ -42,8 +43,7 @@ const CheckBill: React.FC = () => {
   const [bills, setBills] = useState<TableBill[]>([]);
   const [loading, setLoading] = useState(true);
   const [target, setTarget] = useState<TableBill | null>(null);
-  const [closing, setClosing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [payModalOpen, setPayModalOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!shopId) return;
@@ -60,7 +60,9 @@ const CheckBill: React.FC = () => {
       const rosterByLabel = new Map(roster.map((r) => [tableDisplayLabel(r.label, r.zone), r]));
       const withOrders = await Promise.all(
         sessions.map(async (session) => {
-          const orders = await getOrdersBySession(shopId, session.id);
+          // A cancelled ticket was voided, not served — it shouldn't count
+          // toward what the table owes, or get marked "paid" when the bill closes.
+          const orders = (await getOrdersBySession(shopId, session.id)).filter((o) => o.status !== "cancelled");
           const subtotal = orders.reduce((s, o) => s + o.total, 0);
           const chargeApplies = serviceChargeSettings.enabled && !!rosterByLabel.get(session.tableLabel)?.serviceCharge;
           const serviceChargePercent = chargeApplies ? serviceChargeSettings.percent : 0;
@@ -83,35 +85,13 @@ const CheckBill: React.FC = () => {
     (e.target as HTMLIonRefresherElement).complete();
   }
 
-  async function handleClose(paymentType: PaymentType) {
-    if (!shopId || !target) return;
-    setClosing(true);
-    setError(null);
-    try {
-      let serviceCharge: { saleId: string; items: SaleItem[]; total: number } | undefined;
-      if (target.serviceChargeAmount > 0 && target.orders.length > 0) {
-        const first = target.orders[0];
-        const chargeItem: SaleItem = {
-          productId: "__service_charge__",
-          productName: `ຄ່າບໍລິການ (${target.serviceChargePercent}%)`,
-          variant: { size: "", color: "", stock: 0 },
-          quantity: 1,
-          originalPrice: target.serviceChargeAmount,
-          unitPrice: target.serviceChargeAmount,
-          costPrice: 0,
-          needsKitchen: false,
-        };
-        serviceCharge = { saleId: first.id, items: [...first.items, chargeItem], total: first.total + target.serviceChargeAmount };
-      }
-      await closeBill(shopId, target.orders.map((o) => o.id), paymentType, serviceCharge);
-      await closeSession(shopId, target.session.id);
+  async function handlePaySuccess() {
+    if (shopId && target) {
+      await closeSession(shopId, target.session.id).catch(() => {});
       setBills((prev) => prev.filter((b) => b.session.id !== target.session.id));
-      setTarget(null);
-    } catch {
-      setError("ປິດບິນບໍ່ສຳເລັດ, ກະລຸນາລອງໃໝ່");
-    } finally {
-      setClosing(false);
     }
+    setPayModalOpen(false);
+    setTarget(null);
   }
 
   return (
@@ -173,16 +153,15 @@ const CheckBill: React.FC = () => {
 
       <IonModal
         isOpen={!!target}
-        onDidDismiss={() => { setTarget(null); setError(null); }}
+        onDidDismiss={() => setTarget(null)}
         initialBreakpoint={0.6}
         breakpoints={[0, 0.6, 1]}
-        canDismiss={async () => !closing}
       >
         <IonHeader>
           <IonToolbar>
             <IonTitle style={{ fontSize: "1rem" }}>{target?.session.tableLabel}</IonTitle>
             <IonButtons slot="end">
-              <IonButton onClick={() => setTarget(null)} disabled={closing}>ປິດ</IonButton>
+              <IonButton onClick={() => setTarget(null)}>ປິດ</IonButton>
             </IonButtons>
           </IonToolbar>
         </IonHeader>
@@ -221,35 +200,28 @@ const CheckBill: React.FC = () => {
               </div>
             )}
 
-            <p style={{ margin: "0 0 8px", fontSize: "0.82rem", fontWeight: 700, color: "var(--app-text-secondary)" }}>
-              ຈ່າຍດ້ວຍຫຍັງ?
-            </p>
-            <div style={{ display: "flex", gap: 8 }}>
-              {(
-                [
-                  { v: "cash" as const, label: "💵 ສົດ", color: "var(--app-success)" },
-                  { v: "qr" as const, label: "📱 ໂອນ", color: "var(--app-info)" },
-                ]
-              ).map(({ v, label, color }) => (
-                <button
-                  key={v}
-                  disabled={closing}
-                  onClick={() => handleClose(v)}
-                  style={{
-                    flex: 1, padding: "14px 0", borderRadius: 12, border: "none",
-                    background: color, color: "#fff", fontWeight: 700, fontSize: "0.9rem",
-                    cursor: closing ? "not-allowed" : "pointer", opacity: closing ? 0.6 : 1,
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {error && <p style={{ color: "var(--app-danger)", fontSize: "0.85rem", marginTop: 12 }}>{error}</p>}
+            <IonButton
+              expand="block"
+              onClick={() => setPayModalOpen(true)}
+              style={{ minHeight: 52, "--border-radius": "14px", margin: 0 }}
+            >
+              ຢືນຢັນການຊຳລະ
+            </IonButton>
           </div>
         </IonContent>
       </IonModal>
+
+      <PayBillModal
+        isOpen={payModalOpen}
+        shopId={shopId ?? undefined}
+        tableLabel={target?.session.tableLabel ?? ""}
+        targets={target?.orders.map((o) => ({ saleId: o.id })) ?? []}
+        items={target?.orders.flatMap((o) => o.items) ?? []}
+        subtotal={target?.subtotal ?? 0}
+        serviceChargePercent={target?.serviceChargePercent ?? 0}
+        onDismiss={() => setPayModalOpen(false)}
+        onSuccess={handlePaySuccess}
+      />
     </IonPage>
   );
 };
